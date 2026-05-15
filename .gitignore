@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Database (nunca subir a git)
+*.db
+*.db-journal
+prisma/dev.db
+
+# Environment (nunca subir a git — contiene contraseñas y API keys)
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
