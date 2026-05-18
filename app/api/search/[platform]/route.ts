@@ -1,37 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import YouTube from 'youtube-sr';
 
-export const maxDuration = 30; // segundos máximo para la ruta (Vercel/Next)
+export const maxDuration = 30;
 
-// ── Piped: YouTube gratis, sin anuncios, sin API key ────────────────────────
+// ── Piped: respaldo 1 ────────────────────────────────────────────────────────
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.tokhmi.xyz',
   'https://piped-api.garudalinux.org',
   'https://api.piped.projectsegfau.lt',
   'https://pipedapi.mha.fi',
-  'https://piped.lunar.icu/api',
 ];
 
-// ── Invidious: respaldo ──────────────────────────────────────────────────────
+// ── Invidious: respaldo 2 ────────────────────────────────────────────────────
 const INVIDIOUS_INSTANCES = [
   'https://invidious.privacydev.net',
   'https://iv.melmac.space',
   'https://invidious.fdn.fr',
   'https://yt.artemislena.eu',
   'https://inv.in.projectsegfau.lt',
-  'https://invidious.nerdvpn.de',
-  'https://invidious.lunar.icu',
-  'https://invidious.io.lol',
 ];
 
-// Prueba TODAS las instancias en paralelo — devuelve la primera que responda
 async function searchPiped(query: string): Promise<any[] | null> {
   try {
     return await Promise.any(
       PIPED_INSTANCES.map(async (instance) => {
         const res = await fetch(
           `${instance}/search?q=${encodeURIComponent(query)}&filter=videos`,
-          { headers: { 'User-Agent': 'WatchRoom/1.0' }, signal: AbortSignal.timeout(8000) }
+          { headers: { 'User-Agent': 'WatchRoom/1.0' }, signal: AbortSignal.timeout(7000) }
         );
         if (!res.ok) throw new Error('not ok');
         const data = await res.json();
@@ -50,9 +46,7 @@ async function searchPiped(query: string): Promise<any[] | null> {
         return videos;
       })
     );
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function searchInvidious(query: string, page: number): Promise<any[] | null> {
@@ -62,7 +56,7 @@ async function searchInvidious(query: string, page: number): Promise<any[] | nul
       INVIDIOUS_INSTANCES.map(async (instance) => {
         const res = await fetch(`${instance}${path}`, {
           headers: { 'User-Agent': 'WatchRoom/1.0' },
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(7000),
         });
         if (!res.ok) throw new Error('not ok');
         const data = await res.json();
@@ -70,58 +64,56 @@ async function searchInvidious(query: string, page: number): Promise<any[] | nul
         const videos = data
           .filter((item: any) => item.type === 'video' && item.videoId)
           .map((item: any) => {
-            const thumb =
-              item.videoThumbnails?.find((t: any) => t.quality === 'medium') ??
-              item.videoThumbnails?.[0];
-            return {
-              id: item.videoId,
-              title: item.title,
-              thumbnail: thumb?.url,
-              channel: item.author,
-              views: item.viewCount,
-              duration: item.lengthSeconds,
-              platform: 'youtube',
-            };
+            const thumb = item.videoThumbnails?.find((t: any) => t.quality === 'medium') ?? item.videoThumbnails?.[0];
+            return { id: item.videoId, title: item.title, thumbnail: thumb?.url, channel: item.author, views: item.viewCount, duration: item.lengthSeconds, platform: 'youtube' };
           });
         if (videos.length === 0) throw new Error('empty');
         return videos;
       })
     );
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export async function GET(req: NextRequest, { params }: { params: { platform: string } }) {
   const { platform } = params;
-  const query       = req.nextUrl.searchParams.get('q') || '';
-  const pageToken   = req.nextUrl.searchParams.get('pageToken') || '';
+  const query     = req.nextUrl.searchParams.get('q') || '';
+  const pageToken = req.nextUrl.searchParams.get('pageToken') || '';
 
   if (!query.trim()) return NextResponse.json({ results: [] });
 
   try {
     switch (platform) {
 
-      // ─── YouTube ────────────────────────────────────────────────────────────
       case 'youtube': {
         const page = pageToken ? parseInt(pageToken) : 1;
 
-        // 1. Piped (paralelo — devuelve el más rápido)
+        // 1. youtube-sr — scraping directo a YouTube, sin API key, funciona en cloud
+        try {
+          const raw = await YouTube.search(query, { limit: 15, type: 'video', safeSearch: false });
+          if (raw.length > 0) {
+            const results = raw.map((v) => ({
+              id:        v.id ?? '',
+              title:     v.title ?? '',
+              thumbnail: v.thumbnail?.url ?? `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`,
+              channel:   v.channel?.name ?? '',
+              duration:  v.duration ?? 0,
+              views:     v.views ?? 0,
+              platform:  'youtube',
+            }));
+            return NextResponse.json({ results, nextPageToken: results.length >= 15 ? String(page + 1) : '' });
+          }
+        } catch { /* continúa con respaldos */ }
+
+        // 2. Piped (paralelo)
         const pipedResults = await searchPiped(query);
         if (pipedResults) {
-          return NextResponse.json({
-            results: pipedResults,
-            nextPageToken: pipedResults.length >= 15 ? String(page + 1) : '',
-          });
+          return NextResponse.json({ results: pipedResults, nextPageToken: pipedResults.length >= 15 ? String(page + 1) : '' });
         }
 
-        // 2. Invidious (paralelo — respaldo)
+        // 3. Invidious (paralelo)
         const invResults = await searchInvidious(query, page);
         if (invResults) {
-          return NextResponse.json({
-            results: invResults,
-            nextPageToken: invResults.length >= 15 ? String(page + 1) : '',
-          });
+          return NextResponse.json({ results: invResults, nextPageToken: invResults.length >= 15 ? String(page + 1) : '' });
         }
 
         return NextResponse.json(
@@ -130,54 +122,35 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
         );
       }
 
-      // ─── Twitch ─────────────────────────────────────────────────────────────
       case 'twitch': {
         const clientId     = process.env.TWITCH_CLIENT_ID;
         const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-        if (!clientId || !clientSecret) {
+        if (!clientId || !clientSecret)
           return NextResponse.json({ error: 'Twitch API no configurada', results: [] }, { status: 503 });
-        }
-        const tokenRes = await fetch(
-          `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-          { method: 'POST' }
-        );
+
+        const tokenRes   = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
         const { access_token } = await tokenRes.json();
-        const searchRes = await fetch(
-          `https://api.twitch.tv/helix/search/channels?query=${encodeURIComponent(query)}&first=24`,
-          { headers: { 'Client-ID': clientId, Authorization: `Bearer ${access_token}` } }
-        );
+        const searchRes  = await fetch(`https://api.twitch.tv/helix/search/channels?query=${encodeURIComponent(query)}&first=24`, { headers: { 'Client-ID': clientId, Authorization: `Bearer ${access_token}` } });
         const searchData = await searchRes.json();
+
         return NextResponse.json({
           results: (searchData.data || []).map((item: any) => ({
-            id:        item.broadcaster_login,
-            title:     item.title || item.display_name,
+            id: item.broadcaster_login, title: item.title || item.display_name,
             thumbnail: item.thumbnail_url?.replace('{width}', '320').replace('{height}', '180'),
-            channel:   item.display_name,
-            isLive:    item.is_live,
-            gameName:  item.game_name,
-            platform:  'twitch',
+            channel: item.display_name, isLive: item.is_live, gameName: item.game_name, platform: 'twitch',
           })),
         });
       }
 
-      // ─── Kick ───────────────────────────────────────────────────────────────
       case 'kick': {
-        const res = await fetch(
-          `https://kick.com/api/v2/search?searched_phrase=${encodeURIComponent(query)}`,
-          { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' } }
-        );
+        const res = await fetch(`https://kick.com/api/v2/search?searched_phrase=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' } });
         if (!res.ok) return NextResponse.json({ results: [], message: 'Kick no disponible temporalmente' });
         const data = await res.json();
         return NextResponse.json({
           results: (data.channels || []).map((item: any) => ({
-            id:       item.slug || item.username,
-            title:    item.livestream?.session_title || item.user?.username || item.slug,
-            thumbnail:item.user?.profile_pic || item.banner_image?.url,
-            channel:  item.user?.username || item.slug,
-            isLive:   !!item.livestream,
-            viewers:  item.livestream?.viewer_count,
-            category: item.category?.name,
-            platform: 'kick',
+            id: item.slug || item.username, title: item.livestream?.session_title || item.user?.username || item.slug,
+            thumbnail: item.user?.profile_pic || item.banner_image?.url, channel: item.user?.username || item.slug,
+            isLive: !!item.livestream, viewers: item.livestream?.viewer_count, category: item.category?.name, platform: 'kick',
           })),
         });
       }
