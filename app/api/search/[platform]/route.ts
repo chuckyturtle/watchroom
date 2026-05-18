@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // Instancias públicas de Invidious (YouTube sin API key, gratis)
 const INVIDIOUS_INSTANCES = [
+  'https://invidious.privacydev.net',
   'https://iv.melmac.space',
   'https://invidious.fdn.fr',
   'https://yt.artemislena.eu',
   'https://inv.in.projectsegfau.lt',
   'https://invidious.nerdvpn.de',
-  'https://invidious.privacydev.net',
   'https://invidious.lunar.icu',
+  'https://invidious.io.lol',
+  'https://invidious.perennialte.ch',
+  'https://invidious.reallyaweso.me',
 ];
 
 async function fetchInvidious(path: string): Promise<any> {
@@ -49,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
             const url =
               `https://www.googleapis.com/youtube/v3/search` +
               `?part=snippet&q=${encodeURIComponent(query)}&type=video` +
-              `&videoCategoryId=10&maxResults=15&key=${ytKey}`;
+              `&maxResults=15&key=${ytKey}`;
             const ytRes = await fetch(url, { signal: AbortSignal.timeout(7000) });
             if (ytRes.ok) {
               const ytData = await ytRes.json();
