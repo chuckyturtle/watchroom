@@ -26,5 +26,3 @@ services:
         sync: false
       - key: YOUTUBE_API_KEY
         sync: false
-      - key: RAPIDAPI_KEY
-        sync: false

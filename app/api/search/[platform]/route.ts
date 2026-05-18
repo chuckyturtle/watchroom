@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Instancias públicas de Piped (YouTube gratis, sin anuncios, sin API key)
+// ── Piped: YouTube gratis, sin anuncios, sin API key ────────────────────────
+// Funciona desde servidores cloud (Render, Railway, etc.)
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.tokhmi.xyz',
@@ -10,7 +11,8 @@ const PIPED_INSTANCES = [
   'https://piped.lunar.icu/api',
 ];
 
-// Instancias públicas de Invidious (respaldo adicional)
+// ── Invidious: respaldo adicional ────────────────────────────────────────────
+// Funciona bien en local; puede estar bloqueado en IPs de cloud
 const INVIDIOUS_INSTANCES = [
   'https://invidious.privacydev.net',
   'https://iv.melmac.space',
@@ -22,17 +24,16 @@ const INVIDIOUS_INSTANCES = [
   'https://invidious.io.lol',
 ];
 
-async function fetchPiped(query: string, page: number): Promise<any[] | null> {
+async function searchPiped(query: string): Promise<any[] | null> {
   for (const instance of PIPED_INSTANCES) {
     try {
       const res = await fetch(
         `${instance}/search?q=${encodeURIComponent(query)}&filter=videos`,
-        { headers: { 'User-Agent': 'WatchRoom/1.0' }, signal: AbortSignal.timeout(8000) }
+        { headers: { 'User-Agent': 'WatchRoom/1.0' }, signal: AbortSignal.timeout(6000) }
       );
       if (!res.ok) continue;
       const data = await res.json();
-      const items = data?.items ?? [];
-      const videos = items
+      const videos = (data?.items ?? [])
         .filter((v: any) => v.url?.startsWith('/watch') && v.title)
         .map((v: any) => ({
           id: v.url.replace('/watch?v=', ''),
@@ -51,17 +52,34 @@ async function fetchPiped(query: string, page: number): Promise<any[] | null> {
   return null;
 }
 
-async function fetchInvidious(path: string): Promise<any> {
+async function searchInvidious(query: string, page: number): Promise<any[] | null> {
+  const path = `/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=${page}&sort_by=relevance`;
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
       const res = await fetch(`${instance}${path}`, {
         headers: { 'User-Agent': 'WatchRoom/1.0' },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(6000),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) return data;
-      }
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) continue;
+      const videos = data
+        .filter((item: any) => item.type === 'video' && item.videoId)
+        .map((item: any) => {
+          const thumb =
+            item.videoThumbnails?.find((t: any) => t.quality === 'medium') ??
+            item.videoThumbnails?.[0];
+          return {
+            id: item.videoId,
+            title: item.title,
+            thumbnail: thumb?.url,
+            channel: item.author,
+            views: item.viewCount,
+            duration: item.lengthSeconds,
+            platform: 'youtube',
+          };
+        });
+      if (videos.length > 0) return videos;
     } catch {
       continue;
     }
@@ -79,39 +97,12 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
   try {
     switch (platform) {
 
-      // ─── YouTube: YouTube Data API v3 primary, Invidious fallback ───
+      // ─── YouTube ────────────────────────────────────────────────────────────
       case 'youtube': {
-        const ytKey = process.env.YOUTUBE_API_KEY;
-
-        // Primary: YouTube Data API v3 (when key is set)
-        if (ytKey) {
-          try {
-            const url =
-              `https://www.googleapis.com/youtube/v3/search` +
-              `?part=snippet&q=${encodeURIComponent(query)}&type=video` +
-              `&maxResults=15&key=${ytKey}`;
-            const ytRes = await fetch(url, { signal: AbortSignal.timeout(7000) });
-            if (ytRes.ok) {
-              const ytData = await ytRes.json();
-              if (ytData.items?.length) {
-                const results = ytData.items
-                  .filter((item: any) => item.id?.videoId)
-                  .map((item: any) => ({
-                    id: item.id.videoId,
-                    title: item.snippet.title,
-                    thumbnail: item.snippet.thumbnails?.medium?.url ?? item.snippet.thumbnails?.default?.url,
-                    channel: item.snippet.channelTitle,
-                    platform: 'youtube',
-                  }));
-                return NextResponse.json({ results });
-              }
-            }
-          } catch { /* fall through to Invidious */ }
-        }
-
-        // Fallback 1: Piped (gratis, sin anuncios, sin API key)
         const page = pageToken ? parseInt(pageToken) : 1;
-        const pipedResults = await fetchPiped(query, page);
+
+        // 1. Piped (funciona desde Render/cloud)
+        const pipedResults = await searchPiped(query);
         if (pipedResults) {
           return NextResponse.json({
             results: pipedResults,
@@ -119,40 +110,22 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
           });
         }
 
-        // Fallback 2: Invidious
-        const path = `/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=${page}&sort_by=relevance`;
-        const invData = await fetchInvidious(path);
-
-        if (!invData) {
-          return NextResponse.json(
-            { error: 'Búsqueda de YouTube temporalmente no disponible, intenta de nuevo', results: [] },
-            { status: 503 }
-          );
+        // 2. Invidious (funciona en local, respaldo cloud)
+        const invResults = await searchInvidious(query, page);
+        if (invResults) {
+          return NextResponse.json({
+            results: invResults,
+            nextPageToken: invResults.length >= 15 ? String(page + 1) : '',
+          });
         }
 
-        const results = invData
-          .filter((item: any) => item.type === 'video' && item.videoId)
-          .map((item: any) => {
-            const thumb = item.videoThumbnails?.find((t: any) => t.quality === 'medium')
-              || item.videoThumbnails?.[0];
-            return {
-              id: item.videoId,
-              title: item.title,
-              thumbnail: thumb?.url,
-              channel: item.author,
-              views: item.viewCount,
-              duration: item.lengthSeconds,
-              platform: 'youtube',
-            };
-          });
-
-        return NextResponse.json({
-          results,
-          nextPageToken: results.length >= 15 ? String(page + 1) : '',
-        });
+        return NextResponse.json(
+          { error: 'Búsqueda de YouTube temporalmente no disponible, intenta de nuevo', results: [] },
+          { status: 503 }
+        );
       }
 
-      // ─── Twitch ───
+      // ─── Twitch ─────────────────────────────────────────────────────────────
       case 'twitch': {
         const clientId = process.env.TWITCH_CLIENT_ID;
         const clientSecret = process.env.TWITCH_CLIENT_SECRET;
@@ -185,7 +158,7 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
         });
       }
 
-      // ─── Kick ───
+      // ─── Kick ───────────────────────────────────────────────────────────────
       case 'kick': {
         const res = await fetch(
           `https://kick.com/api/v2/search?searched_phrase=${encodeURIComponent(query)}`,
