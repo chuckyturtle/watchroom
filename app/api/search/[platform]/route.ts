@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Instancias públicas de Invidious (YouTube sin API key, gratis)
+// Instancias públicas de Piped (YouTube gratis, sin anuncios, sin API key)
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.tokhmi.xyz',
+  'https://piped-api.garudalinux.org',
+  'https://api.piped.projectsegfau.lt',
+  'https://pipedapi.mha.fi',
+  'https://piped.lunar.icu/api',
+];
+
+// Instancias públicas de Invidious (respaldo adicional)
 const INVIDIOUS_INSTANCES = [
   'https://invidious.privacydev.net',
   'https://iv.melmac.space',
@@ -10,9 +20,36 @@ const INVIDIOUS_INSTANCES = [
   'https://invidious.nerdvpn.de',
   'https://invidious.lunar.icu',
   'https://invidious.io.lol',
-  'https://invidious.perennialte.ch',
-  'https://invidious.reallyaweso.me',
 ];
+
+async function fetchPiped(query: string, page: number): Promise<any[] | null> {
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const res = await fetch(
+        `${instance}/search?q=${encodeURIComponent(query)}&filter=videos`,
+        { headers: { 'User-Agent': 'WatchRoom/1.0' }, signal: AbortSignal.timeout(8000) }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const items = data?.items ?? [];
+      const videos = items
+        .filter((v: any) => v.url?.startsWith('/watch') && v.title)
+        .map((v: any) => ({
+          id: v.url.replace('/watch?v=', ''),
+          title: v.title,
+          thumbnail: v.thumbnail,
+          channel: v.uploaderName,
+          duration: v.duration,
+          views: v.views,
+          platform: 'youtube',
+        }));
+      if (videos.length > 0) return videos;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 async function fetchInvidious(path: string): Promise<any> {
   for (const instance of INVIDIOUS_INSTANCES) {
@@ -72,20 +109,28 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
           } catch { /* fall through to Invidious */ }
         }
 
-        // Fallback: Invidious (free, no key needed)
+        // Fallback 1: Piped (gratis, sin anuncios, sin API key)
         const page = pageToken ? parseInt(pageToken) : 1;
+        const pipedResults = await fetchPiped(query, page);
+        if (pipedResults) {
+          return NextResponse.json({
+            results: pipedResults,
+            nextPageToken: pipedResults.length >= 15 ? String(page + 1) : '',
+          });
+        }
+
+        // Fallback 2: Invidious
         const path = `/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=${page}&sort_by=relevance`;
+        const invData = await fetchInvidious(path);
 
-        const data = await fetchInvidious(path);
-
-        if (!data) {
+        if (!invData) {
           return NextResponse.json(
             { error: 'Búsqueda de YouTube temporalmente no disponible, intenta de nuevo', results: [] },
             { status: 503 }
           );
         }
 
-        const results = data
+        const results = invData
           .filter((item: any) => item.type === 'video' && item.videoId)
           .map((item: any) => {
             const thumb = item.videoThumbnails?.find((t: any) => t.quality === 'medium')
@@ -95,10 +140,8 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
               title: item.title,
               thumbnail: thumb?.url,
               channel: item.author,
-              description: item.description,
               views: item.viewCount,
               duration: item.lengthSeconds,
-              uploadedDate: item.publishedText,
               platform: 'youtube',
             };
           });
