@@ -161,9 +161,33 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   const [queueMsg,       setQueueMsg]      = useState('');
   const queueRef = useRef<QueueItem[]>([]); // mirror for use in effects
 
-  const myUsername = useMemo(() => user?.username    || guestName(), [user?.username]);
-  const myColor    = useMemo(() => user?.avatarColor || '#6366f1',   [user?.avatarColor]);
-  const myUserId   = useMemo(() => user?.id          || 'guest-' + Math.random().toString(36).slice(2), [user?.id]);
+  // Stable identity refs — initialized once from localStorage so the socket
+  // never disconnects when the AuthContext finishes loading from localStorage.
+  const stableIdRef   = useRef<string>('');
+  const stableNameRef = useRef<string>('');
+  const stableColorRef2 = useRef<string>('#6366f1');
+  if (!stableIdRef.current) {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('wr_user') : null;
+      const u = saved ? JSON.parse(saved) : null;
+      stableIdRef.current   = u?.id          || 'guest-' + Math.random().toString(36).slice(2);
+      stableNameRef.current = u?.username     || guestName();
+      stableColorRef2.current = u?.avatarColor || '#6366f1';
+    } catch {
+      stableIdRef.current   = 'guest-' + Math.random().toString(36).slice(2);
+      stableNameRef.current = guestName();
+    }
+  }
+  // Keep refs up-to-date when auth context hydrates (but don't trigger socket reconnect)
+  useEffect(() => {
+    if (user?.id)          stableIdRef.current     = user.id;
+    if (user?.username)    stableNameRef.current   = user.username;
+    if (user?.avatarColor) stableColorRef2.current = user.avatarColor;
+  }, [user?.id, user?.username, user?.avatarColor]);
+
+  const myUsername = user?.username    || stableNameRef.current;
+  const myColor    = user?.avatarColor || stableColorRef2.current;
+  const myUserId   = user?.id          || stableIdRef.current;
 
   // Mobile detection
   useEffect(() => {
@@ -175,6 +199,15 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   // Keep refs fresh across renders
   useEffect(() => { ptsTokenRef.current  = token;      }, [token]);
   useEffect(() => { ptsUpdateRef.current = updateUser; }, [updateUser]);
+
+  // When auth context finishes loading and we have a real userId, register it
+  // with the socket so invites are delivered correctly (no reconnect needed)
+  useEffect(() => {
+    if (!user?.id || user.id.startsWith('guest-')) return;
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('register-user', { userId: user.id });
+    }
+  }, [user?.id]);
 
   // Sync points from auth context (handles login/external updates)
   useEffect(() => { if (user?.points !== undefined) setRoomPoints(user.points); }, [user?.points]);
@@ -311,8 +344,12 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     const socket = io({ path: '/socket.io' });
     socketRef.current = socket;
 
+    // Use stable refs so this only runs once per roomId, not on every auth-context hydration
     socket.emit('join-room', {
-      roomId, userId: myUserId, username: myUsername, color: myColor,
+      roomId,
+      userId:   stableIdRef.current,
+      username: stableNameRef.current,
+      color:    stableColorRef2.current,
       x: playerRef.current.x, z: playerRef.current.z,
     });
 
@@ -371,10 +408,12 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       setTimeout(() => setInvite(null), 15000);
     });
 
-    if (myUserId && !myUserId.startsWith('guest-')) socket.emit('register-user', { userId: myUserId });
+    if (stableIdRef.current && !stableIdRef.current.startsWith('guest-')) {
+      socket.emit('register-user', { userId: stableIdRef.current });
+    }
 
     return () => { socket.disconnect(); };
-  }, [roomId, myUserId, myUsername, myColor]);
+  }, [roomId]); // Only roomId — stable refs prevent reconnection when auth context loads
 
   // ── Three.js scene ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1214,6 +1253,13 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
             <button onClick={() => { setQueueMode(false); setShowSearch(true); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
               🔍 Buscar video
+            </button>
+          )}
+          {/* Agregar a la cola — visible cuando hay 2+ personas y el usuario está logueado */}
+          {online >= 2 && user && (
+            <button onClick={() => { setQueueMode(true); setShowSearch(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
+              🎵 + Cola <span className="text-amber-400 font-bold">30🪙</span>
             </button>
           )}
           {/* Skip — only when queue has items */}
