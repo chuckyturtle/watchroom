@@ -6,6 +6,9 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npx prisma db push && npm start
     envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+    envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
