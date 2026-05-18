@@ -4,6 +4,11 @@ node_modules/
 # Next.js
 .next/
 out/
+next-env.d.ts
+
+# TypeScript build cache (local — never commit)
+*.tsbuildinfo
+tsconfig.tsbuildinfo
 
 # Database (nunca subir a git)
 *.db
