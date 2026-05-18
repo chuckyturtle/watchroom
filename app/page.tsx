@@ -89,9 +89,36 @@ export default function HomePage() {
             Ve contenido con{' '}
             <span className="text-gradient">tus amigos</span>
           </h1>
-          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-10">
+          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-8">
             YouTube, Twitch y Kick sin anuncios. Crea salas inmersivas, camina, chatea y ve en grupo.
           </p>
+
+          {/* Global room CTA */}
+          <div className="flex justify-center mb-10">
+            <a
+              href="/sala-global"
+              className="group relative flex items-center gap-3 px-7 py-4 rounded-2xl font-bold text-base transition-all duration-300 hover:scale-105"
+              style={{
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(139,92,246,0.2) 100%)',
+                border: '1px solid rgba(99,102,241,0.45)',
+                color: '#c7d2fe',
+                boxShadow: '0 0 40px rgba(99,102,241,0.12)',
+              }}
+            >
+              <span className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                style={{ background: 'rgba(99,102,241,0.1)', boxShadow: '0 0 48px rgba(99,102,241,0.3)' }} />
+              <span className="text-2xl relative z-10">🌍</span>
+              <span className="relative z-10 text-left">
+                <span className="block text-white font-black text-base leading-tight">Entrar a la Sala Inmersiva Global</span>
+                <span className="block text-indigo-300/70 text-xs font-normal mt-0.5">Mundo 3D · Encuéntrate con gente de todo el mundo</span>
+              </span>
+              <span className="relative z-10 flex items-center gap-1.5 ml-2 px-2.5 py-1 rounded-full text-xs font-bold"
+                style={{ background: 'rgba(99,102,241,0.3)', color: '#a5b4fc' }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                EN VIVO
+              </span>
+            </a>
+          </div>
 
           {/* Platform tabs */}
           <div className="flex justify-center gap-2 mb-6">

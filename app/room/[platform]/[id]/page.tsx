@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -8,7 +8,6 @@ import Navbar from '@/components/Navbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { saveToHistory } from '@/lib/watchHistory';
-import PlaybackPointsTracker from '@/components/PlaybackPointsTracker';
 
 const ImmersiveRoom3D = dynamic(() => import('@/components/ImmersiveRoom3D'), { ssr: false });
 
@@ -33,14 +32,7 @@ export default function RoomPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<Set<string>>(new Set());
-  const [plusAnim, setPlusAnim] = useState<number | null>(null); // key para forzar re-render de animación
-
   const socketRef = useRef<Socket | null>(null);
-
-  const handlePointsGranted = useCallback(() => {
-    setPlusAnim(Date.now());
-    setTimeout(() => setPlusAnim(null), 1800);
-  }, []);
 
   const cfg = PLATFORM_LABELS[platform] || PLATFORM_LABELS.youtube;
 
@@ -181,36 +173,6 @@ export default function RoomPage() {
 
         {/* 3D Immersive room — fills remaining space */}
         <div className="flex-1 min-h-0 relative">
-          {user && <PlaybackPointsTracker showToast={false} onPointsGranted={handlePointsGranted} />}
-
-          {/* HUD de puntos — esquina superior derecha */}
-          {user && (
-            <div
-              className="absolute top-3 right-3 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-xl select-none pointer-events-none"
-              style={{
-                background: 'rgba(0,0,0,0.55)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(245,158,11,0.25)',
-              }}
-            >
-              <span style={{ fontSize: '0.9rem' }}>🪙</span>
-              <span className="text-amber-300 font-bold text-sm tabular-nums">
-                {(user.points ?? 0).toLocaleString()}
-              </span>
-
-              {/* Animación +15 */}
-              {plusAnim && (
-                <span
-                  key={plusAnim}
-                  className="absolute -top-5 right-0 text-amber-300 font-black text-sm"
-                  style={{ animation: 'floatUp 1.8s ease forwards' }}
-                >
-                  +15
-                </span>
-              )}
-            </div>
-          )}
-
           <ImmersiveRoom3D
             platform={platform}
             contentId={id}

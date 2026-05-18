@@ -22,6 +22,15 @@ app.prepare().then(() => {
   const rooms = new Map();
   // userIndex: userId -> socketId (for invite delivery)
   const userIndex = new Map();
+  // queues: roomId -> QueueItem[]
+  const queues = new Map();
+  // lastAdvance: roomId -> timestamp — deduplicates simultaneous queue-advance from multiple clients
+  const lastAdvance = new Map();
+
+  function getQueue(roomId) {
+    if (!queues.has(roomId)) queues.set(roomId, []);
+    return queues.get(roomId);
+  }
 
   io.on('connection', (socket) => {
     let currentRoom = null;
@@ -46,6 +55,13 @@ app.prepare().then(() => {
 
       socket.emit('room-users', existing);
       socket.to(roomId).emit('user-joined', { socketId: socket.id, ...currentUser });
+
+      // Send current queue to the joining user, and play the current video if one is active
+      const currentQueue = getQueue(roomId);
+      socket.emit('queue-updated', { queue: currentQueue });
+      if (currentQueue.length > 0) {
+        socket.emit('queue-play', { item: currentQueue[0], queue: currentQueue });
+      }
     });
 
     socket.on('move', ({ x, z }) => {
@@ -58,7 +74,9 @@ app.prepare().then(() => {
 
     socket.on('chat-message', ({ message }) => {
       if (!currentRoom || !currentUser) return;
-      io.to(currentRoom).emit('new-message', {
+      // Broadcast to everyone else; sender already updates their own UI immediately
+      socket.to(currentRoom).emit('chat-message', {
+        socketId: socket.id,
         userId: currentUser.userId,
         username: currentUser.username,
         color: currentUser.color,
@@ -77,6 +95,50 @@ app.prepare().then(() => {
       io.to(currentRoom).emit('global-video-changed', { videoId });
     });
 
+    // ── Queue events ──────────────────────────────────────────────────────────
+
+    // Client already deducted 30 pts via /api/points/deduct before emitting this
+    socket.on('queue-add', ({ videoId, videoTitle, thumbnail, platform }) => {
+      if (!currentRoom || !currentUser) return;
+      const queue = getQueue(currentRoom);
+      const item = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+        userId: currentUser.userId,
+        username: currentUser.username,
+        color: currentUser.color,
+        videoId,
+        videoTitle: videoTitle || 'Video sin título',
+        thumbnail: thumbnail || '',
+        platform: platform || 'youtube',
+      };
+      queue.push(item);
+      io.to(currentRoom).emit('queue-updated', { queue: [...queue] });
+      // If this is the only item, play it immediately
+      if (queue.length === 1) {
+        io.to(currentRoom).emit('queue-play', { item, queue: [...queue] });
+      }
+    });
+
+    // Advance to next video in queue (video ended or skip paid)
+    socket.on('queue-advance', () => {
+      if (!currentRoom) return;
+      const queue = getQueue(currentRoom);
+      if (queue.length === 0) return;
+
+      // Deduplicate: all clients detect video-end simultaneously, only process once per 5 s
+      const now = Date.now();
+      if (now - (lastAdvance.get(currentRoom) || 0) < 5000) return;
+      lastAdvance.set(currentRoom, now);
+
+      queue.shift(); // Remove now-playing item
+      io.to(currentRoom).emit('queue-updated', { queue: [...queue] });
+      if (queue.length > 0) {
+        io.to(currentRoom).emit('queue-play', { item: queue[0], queue: [...queue] });
+      }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     socket.on('send-invite', (invite) => {
       const targetSocketId = userIndex.get(invite.toUserId);
       if (targetSocketId) {
@@ -93,8 +155,12 @@ app.prepare().then(() => {
       if (registeredUserId) userIndex.delete(registeredUserId);
       if (currentRoom) {
         rooms.get(currentRoom)?.delete(socket.id);
-        if (rooms.get(currentRoom)?.size === 0) rooms.delete(currentRoom);
-        io.to(currentRoom).emit('user-left', socket.id);
+        if (rooms.get(currentRoom)?.size === 0) {
+          rooms.delete(currentRoom);
+          queues.delete(currentRoom);
+          lastAdvance.delete(currentRoom);
+        }
+        io.to(currentRoom).emit('user-left', { socketId: socket.id, username: currentUser?.username || '' });
       }
     });
   });

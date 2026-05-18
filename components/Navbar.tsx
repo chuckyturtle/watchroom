@@ -58,6 +58,7 @@ export default function Navbar() {
 
               {menuOpen && (
                 <div className="absolute right-0 top-full mt-2 w-52 glass rounded-xl shadow-2xl border border-white/5 py-1 z-50">
+
                   <Link
                     href={`/profile/${user.username}`}
                     className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors"

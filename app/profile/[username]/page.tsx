@@ -26,7 +26,13 @@ export default function ProfilePage() {
   const [isMe, setIsMe] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [points, setPoints] = useState(0);
+  const [points, setPoints] = useState<number>(() => {
+    try {
+      if (typeof window === 'undefined') return 0;
+      const saved = localStorage.getItem('wr_user');
+      return saved ? (JSON.parse(saved)?.points ?? 0) : 0;
+    } catch { return 0; }
+  });
 
   // Edit mode
   const [editing, setEditing] = useState(false);
@@ -178,12 +184,12 @@ export default function ProfilePage() {
               {points.toLocaleString()}
             </p>
             <p className="text-[11px] text-amber-500/60 mt-0.5">
-              +15 pts/min reproduciendo · próximamente canjeables en la sala 3D
+              +10 pts/min reproduciendo · próximamente canjeables en la sala 3D
             </p>
           </div>
           <div className="shrink-0 text-right">
             <p className="text-xs text-amber-600/50 font-medium">
-              {Math.floor(points / 15)} min
+              {Math.floor(points / 10)} min
             </p>
             <p className="text-[10px] text-amber-700/40">escuchados</p>
           </div>

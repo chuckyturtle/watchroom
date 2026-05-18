@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 // Instancias públicas de Invidious (YouTube sin API key, gratis)
 const INVIDIOUS_INSTANCES = [
   'https://iv.melmac.space',
+  'https://invidious.fdn.fr',
+  'https://yt.artemislena.eu',
   'https://inv.in.projectsegfau.lt',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.privacydev.net',
+  'https://invidious.lunar.icu',
 ];
 
 async function fetchInvidious(path: string): Promise<any> {
@@ -34,8 +39,37 @@ export async function GET(req: NextRequest, { params }: { params: { platform: st
   try {
     switch (platform) {
 
-      // ─── YouTube via Invidious API (sin API key, completamente gratis) ───
+      // ─── YouTube: YouTube Data API v3 primary, Invidious fallback ───
       case 'youtube': {
+        const ytKey = process.env.YOUTUBE_API_KEY;
+
+        // Primary: YouTube Data API v3 (when key is set)
+        if (ytKey) {
+          try {
+            const url =
+              `https://www.googleapis.com/youtube/v3/search` +
+              `?part=snippet&q=${encodeURIComponent(query)}&type=video` +
+              `&videoCategoryId=10&maxResults=15&key=${ytKey}`;
+            const ytRes = await fetch(url, { signal: AbortSignal.timeout(7000) });
+            if (ytRes.ok) {
+              const ytData = await ytRes.json();
+              if (ytData.items?.length) {
+                const results = ytData.items
+                  .filter((item: any) => item.id?.videoId)
+                  .map((item: any) => ({
+                    id: item.id.videoId,
+                    title: item.snippet.title,
+                    thumbnail: item.snippet.thumbnails?.medium?.url ?? item.snippet.thumbnails?.default?.url,
+                    channel: item.snippet.channelTitle,
+                    platform: 'youtube',
+                  }));
+                return NextResponse.json({ results });
+              }
+            }
+          } catch { /* fall through to Invidious */ }
+        }
+
+        // Fallback: Invidious (free, no key needed)
         const page = pageToken ? parseInt(pageToken) : 1;
         const path = `/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=${page}&sort_by=relevance`;
 
