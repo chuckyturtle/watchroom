@@ -114,7 +114,18 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   }>>(new Map());
   const localBubblesRef = useRef<{ sprite: any; timer: ReturnType<typeof setTimeout> }[]>([]);
 
+  // ── Mobile touch controls ─────────────────────────────────────────────────
+  const isMobileRef        = useRef(false);
+  const joystickTouchIdRef = useRef<number | null>(null);
+  const joystickBaseRef    = useRef({ x: 0, y: 0 });
+  const joystickDeltaRef   = useRef({ x: 0, y: 0 });
+  const lookTouchIdRef     = useRef<number | null>(null);
+  const lookLastRef        = useRef({ x: 0, y: 0 });
+  const joystickRingRef    = useRef<HTMLDivElement | null>(null);
+  const joystickKnobRef    = useRef<HTMLDivElement | null>(null);
+
   const [locked,         setLocked]        = useState(false);
+  const [isMobile,       setIsMobile]      = useState(false);
   const [chatting,       setChatting]      = useState(false);
   const [messages,       setMessages]      = useState<ChatMsg[]>([]);
   const [chatInput,      setChatInput]     = useState('');
@@ -153,6 +164,13 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   const myUsername = useMemo(() => user?.username    || guestName(), [user?.username]);
   const myColor    = useMemo(() => user?.avatarColor || '#6366f1',   [user?.avatarColor]);
   const myUserId   = useMemo(() => user?.id          || 'guest-' + Math.random().toString(36).slice(2), [user?.id]);
+
+  // Mobile detection
+  useEffect(() => {
+    const mobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    setIsMobile(mobile);
+    isMobileRef.current = mobile;
+  }, []);
 
   // Keep refs fresh across renders
   useEffect(() => { ptsTokenRef.current  = token;      }, [token]);
@@ -605,6 +623,79 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       window.addEventListener('keydown', onDown);
       window.addEventListener('keyup', onUp);
 
+      // ── Mobile touch controls ──
+      const JOYSTICK_R = 52;
+
+      function onTouchStart(e: TouchEvent) {
+        const rect = container.getBoundingClientRect();
+        for (const t of Array.from(e.changedTouches)) {
+          const cx = t.clientX - rect.left;
+          const cy = t.clientY - rect.top;
+          if (cy > container.clientHeight - 72) continue; // let chat bar handle its own touches
+          const isLeft = cx < container.clientWidth / 2;
+          if (isLeft && joystickTouchIdRef.current === null) {
+            joystickTouchIdRef.current = t.identifier;
+            joystickBaseRef.current = { x: t.clientX, y: t.clientY };
+            joystickDeltaRef.current = { x: 0, y: 0 };
+            if (joystickRingRef.current) {
+              joystickRingRef.current.style.left    = `${cx - 50}px`;
+              joystickRingRef.current.style.top     = `${cy - 50}px`;
+              joystickRingRef.current.style.opacity = '1';
+            }
+            if (joystickKnobRef.current)
+              joystickKnobRef.current.style.transform = 'translate(-50%, -50%)';
+          } else if (!isLeft && lookTouchIdRef.current === null) {
+            lookTouchIdRef.current = t.identifier;
+            lookLastRef.current = { x: t.clientX, y: t.clientY };
+          }
+        }
+      }
+
+      function onTouchMove(e: TouchEvent) {
+        let consumed = false;
+        for (const t of Array.from(e.changedTouches)) {
+          if (t.identifier === joystickTouchIdRef.current) {
+            consumed = true;
+            const dx = t.clientX - joystickBaseRef.current.x;
+            const dy = t.clientY - joystickBaseRef.current.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const clamp = Math.min(dist, JOYSTICK_R);
+            const ang = Math.atan2(dy, dx);
+            const ox = Math.cos(ang) * clamp;
+            const oy = Math.sin(ang) * clamp;
+            joystickDeltaRef.current = { x: ox / JOYSTICK_R, y: oy / JOYSTICK_R };
+            if (joystickKnobRef.current)
+              joystickKnobRef.current.style.transform = `translate(calc(-50% + ${ox}px), calc(-50% + ${oy}px))`;
+          } else if (t.identifier === lookTouchIdRef.current) {
+            consumed = true;
+            const dx = t.clientX - lookLastRef.current.x;
+            const dy = t.clientY - lookLastRef.current.y;
+            lookLastRef.current = { x: t.clientX, y: t.clientY };
+            playerRef.current.yaw   -= dx * 0.005;
+            playerRef.current.pitch  = Math.max(-1.1, Math.min(0.8, playerRef.current.pitch - dy * 0.005));
+          }
+        }
+        if (consumed) e.preventDefault();
+      }
+
+      function onTouchEnd(e: TouchEvent) {
+        for (const t of Array.from(e.changedTouches)) {
+          if (t.identifier === joystickTouchIdRef.current) {
+            joystickTouchIdRef.current = null;
+            joystickDeltaRef.current = { x: 0, y: 0 };
+            if (joystickRingRef.current) joystickRingRef.current.style.opacity = '0';
+            if (joystickKnobRef.current) joystickKnobRef.current.style.transform = 'translate(-50%, -50%)';
+          } else if (t.identifier === lookTouchIdRef.current) {
+            lookTouchIdRef.current = null;
+          }
+        }
+      }
+
+      container.addEventListener('touchstart', onTouchStart, { passive: true });
+      container.addEventListener('touchmove',  onTouchMove,  { passive: false });
+      container.addEventListener('touchend',   onTouchEnd,   { passive: true });
+      container.addEventListener('touchcancel', onTouchEnd,  { passive: true });
+
       const onResize = () => {
         const nw = container.clientWidth, nh = container.clientHeight;
         camera.aspect = nw / nh; camera.updateProjectionMatrix();
@@ -633,15 +724,25 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
         const dt = Math.min(clock.getDelta(), 0.05);
         const p  = playerRef.current;
 
-        if (document.pointerLockElement === renderer.domElement) {
+        const isLocked = document.pointerLockElement === renderer.domElement;
+        const jd = joystickDeltaRef.current;
+        const joystickActive = Math.abs(jd.x) > 0.05 || Math.abs(jd.y) > 0.05;
+
+        if (isLocked || joystickActive) {
           const fwd   = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
           const right = new THREE.Vector3( Math.cos(p.yaw), 0, -Math.sin(p.yaw));
           const move  = new THREE.Vector3();
           if (!seatedRef.current) {
-            if (keys['KeyW'] || keys['ArrowUp'])    move.add(fwd);
-            if (keys['KeyS'] || keys['ArrowDown'])  move.sub(fwd);
-            if (keys['KeyA'] || keys['ArrowLeft'])  move.sub(right);
-            if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
+            if (isLocked) {
+              if (keys['KeyW'] || keys['ArrowUp'])    move.add(fwd);
+              if (keys['KeyS'] || keys['ArrowDown'])  move.sub(fwd);
+              if (keys['KeyA'] || keys['ArrowLeft'])  move.sub(right);
+              if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
+            }
+            if (joystickActive) {
+              move.add(fwd.clone().multiplyScalar(-jd.y));
+              move.add(right.clone().multiplyScalar(jd.x));
+            }
             if (move.length() > 0) {
               move.normalize().multiplyScalar(MOVE_SPEED * dt);
               const nx = p.x + move.x, nz = p.z + move.z;
@@ -650,7 +751,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
               else if (isValidPos(p.x, nz)) { p.z = nz; }
             }
           } else {
-            const moving = keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] || keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight'];
+            const moving = (isLocked && (keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] || keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight'])) || joystickActive;
             if (moving) { seatedRef.current = false; seatedSeatRef.current = null; setSeated(false); }
           }
         }
@@ -704,6 +805,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       return () => {
         destroyed = true; cancelAnimationFrame(frame); document.exitPointerLock();
         window.removeEventListener('keydown', onDown); window.removeEventListener('keyup', onUp); window.removeEventListener('resize', onResize);
+        container.removeEventListener('touchstart', onTouchStart); container.removeEventListener('touchmove', onTouchMove); container.removeEventListener('touchend', onTouchEnd); container.removeEventListener('touchcancel', onTouchEnd);
         renderer.dispose(); localBubblesRef.current.forEach(b => clearTimeout(b.timer));
         iframe.src = 'about:blank';
         if (container.contains(renderer.domElement))    container.removeChild(renderer.domElement);
@@ -863,7 +965,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-black select-none"
-      style={{ cursor: locked ? 'none' : 'default' }}>
+      style={{ cursor: locked ? 'none' : 'default', touchAction: 'none' }}>
 
       {/* Invite toast */}
       {invite && (
@@ -945,6 +1047,32 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
               <div className="absolute top-1/2 left-0 right-0 h-px bg-white/50 -translate-y-1/2" />
               <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/50 -translate-x-1/2" />
             </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Mobile joystick + look zones ── */}
+      {isMobile && !showSearch && (
+        <>
+          {/* Zone hint labels — subtle, pointer-events-none */}
+          <div className="absolute z-10 pointer-events-none flex flex-col items-center gap-0.5 opacity-20"
+            style={{ left: '14px', bottom: '88px' }}>
+            <span className="text-3xl">🕹</span>
+            <span className="text-white text-[11px] font-semibold">Mover</span>
+          </div>
+          <div className="absolute z-10 pointer-events-none flex flex-col items-center gap-0.5 opacity-20"
+            style={{ right: '14px', bottom: '88px' }}>
+            <span className="text-3xl">👁</span>
+            <span className="text-white text-[11px] font-semibold">Mirar</span>
+          </div>
+          {/* Dynamic joystick ring — appears where user touches */}
+          <div ref={joystickRingRef}
+            className="absolute z-20 pointer-events-none"
+            style={{ width: '104px', height: '104px', opacity: 0, transition: 'opacity 0.12s' }}>
+            <div className="absolute inset-0 rounded-full border-2 border-white/35 bg-black/25" />
+            <div ref={joystickKnobRef}
+              className="absolute w-11 h-11 rounded-full bg-white/45 border-2 border-white/65 shadow-lg"
+              style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
           </div>
         </>
       )}
