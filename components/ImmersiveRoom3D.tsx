@@ -141,6 +141,10 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   const [suggestions,    setSuggestions]     = useState<any[]>([]);
   const [loadingSuggs,   setLoadingSuggs]    = useState(false);
   const suggestionsLoaded = useRef(false);
+  const suggestionsRef    = useRef<any[]>([]); // mirror for effects
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [currentSuggIdx,  setCurrentSuggIdx]  = useState(-1); // which suggestion is playing
+  const onlineRef         = useRef(1);         // mirror for effects
   const [nearSeatPrompt, setNearSeatPrompt] = useState(false);
   const [seated,         setSeated]        = useState(false);
   const [roomPoints,     setRoomPoints]    = useState<number>(() => {
@@ -295,8 +299,10 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     return () => { window.removeEventListener('wr-video-state', handleVideoState); stopTicking(); };
   }, [token]);
 
-  // Keep queueRef in sync so effects have a fresh reference
-  useEffect(() => { queueRef.current = queue; }, [queue]);
+  // Keep mirrors in sync so effects always have fresh references
+  useEffect(() => { queueRef.current       = queue;   }, [queue]);
+  useEffect(() => { suggestionsRef.current = suggestions; }, [suggestions]);
+  useEffect(() => { onlineRef.current      = online;  }, [online]);
 
   // Detect YouTube video ended → auto-advance queue
   useEffect(() => {
@@ -315,11 +321,24 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
           undefined;
         const ended = state === 0 || state === '0';
         if (!ended) return;
-        if (queueRef.current.length === 0) return;
         const now = Date.now();
         if (now - lastFired < 4000) return; // local debounce
         lastFired = now;
-        socketRef.current?.emit('queue-advance');
+
+        if (queueRef.current.length > 0) {
+          // Multi-user mode: advance the shared queue
+          socketRef.current?.emit('queue-advance');
+        } else if (onlineRef.current === 1 && suggestionsRef.current.length > 0) {
+          // Solo mode: auto-play next suggestion
+          setCurrentSuggIdx(prev => {
+            const next = (prev + 1) % suggestionsRef.current.length;
+            const sugg = suggestionsRef.current[next];
+            if (iframeRef.current) {
+              iframeRef.current.src = buildVideoUrl(sugg.platform || 'youtube', sugg.id);
+            }
+            return next;
+          });
+        }
       } catch {}
     }
     window.addEventListener('message', onMessage);
@@ -886,6 +905,8 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   }, []);
 
   useEffect(() => { if (showSearch) loadSuggestions(); }, [showSearch, loadSuggestions]);
+  // Also load suggestions eagerly in the background (needed for solo auto-advance)
+  useEffect(() => { const t = setTimeout(loadSuggestions, 3000); return () => clearTimeout(t); }, [loadSuggestions]);
 
   // ── Search ────────────────────────────────────────────────────────────────
   async function doSearch() {
@@ -986,10 +1007,11 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     }
   }
 
-  function changeVideo(videoId: string, plat?: string) {
+  function changeVideo(videoId: string, plat?: string, suggIdx?: number) {
     if (iframeRef.current) iframeRef.current.src = buildVideoUrl(plat || platform, videoId);
     socketRef.current?.emit('change-video', { roomId, videoId });
     setShowSearch(false); setSearchResults([]); setSearchQuery('');
+    if (suggIdx !== undefined) setCurrentSuggIdx(suggIdx);
   }
 
   function sendMessage() {
@@ -1217,6 +1239,75 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
         </div>
       )}
 
+      {/* ── Solo suggestions tray — appears above control bar when alone ── */}
+      {online === 1 && showSuggestions && !showSearch && (
+        <div
+          className="absolute z-20 left-0 right-0 flex flex-col"
+          style={{ bottom: '132px', background: 'rgba(6,6,22,0.93)', borderTop: '1px solid rgba(99,102,241,0.18)', borderBottom: '1px solid rgba(99,102,241,0.18)', backdropFilter: 'blur(16px)' }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header row */}
+          <div className="flex items-center justify-between px-4 py-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">✨</span>
+              <span className="text-indigo-300 font-semibold text-xs uppercase tracking-wide">Sugerencias para ti</span>
+              {loadingSuggs && <span className="text-slate-500 text-[10px]">cargando…</span>}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => { setQueueMode(false); setShowSearch(true); }}
+                className="text-slate-400 hover:text-white text-[11px] px-2 py-1 rounded-lg hover:bg-white/5 transition-colors">
+                🔍 Buscar
+              </button>
+              <button onClick={() => setShowSuggestions(false)} className="text-slate-500 hover:text-white text-lg leading-none px-1">×</button>
+            </div>
+          </div>
+
+          {/* Scrollable horizontal strip */}
+          <div className="flex gap-3 overflow-x-auto px-4 pb-3 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
+            {loadingSuggs && Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="shrink-0 w-32 rounded-xl bg-white/5 animate-pulse" style={{ height: '72px' }} />
+            ))}
+            {!loadingSuggs && suggestions.length === 0 && (
+              <p className="text-slate-600 text-xs py-3">
+                Ve más videos para recibir sugerencias personalizadas
+              </p>
+            )}
+            {suggestions.map((s, i) => (
+              <button
+                key={s.id}
+                onClick={() => changeVideo(s.id, s.platform || 'youtube', i)}
+                className="shrink-0 flex flex-col rounded-xl overflow-hidden transition-all text-left"
+                style={{
+                  width: '128px',
+                  border: currentSuggIdx === i
+                    ? '2px solid rgba(99,102,241,0.8)'
+                    : '2px solid rgba(255,255,255,0.06)',
+                  background: currentSuggIdx === i ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
+                }}
+              >
+                {/* Thumbnail */}
+                <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                  {s.thumbnail
+                    ? <img src={s.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    : <div className="absolute inset-0 bg-white/5 flex items-center justify-center text-xl">▶</div>
+                  }
+                  {currentSuggIdx === i && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <span className="text-white text-lg">▶</span>
+                    </div>
+                  )}
+                </div>
+                {/* Title */}
+                <div className="px-1.5 py-1">
+                  <p className="text-white text-[10px] font-medium leading-snug line-clamp-2">{s.title}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Control panel */}
       {!locked && !chatting && !showSearch && (
         <div className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10"
@@ -1248,12 +1339,24 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
               </span>
             )}
           </button>
-          {/* Solo cuando estás solo en la sala puedes cambiar el video directamente */}
+          {/* Solo mode: suggestions toggle + search */}
           {online === 1 && (
-            <button onClick={() => { setQueueMode(false); setShowSearch(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
-              🔍 Buscar video
-            </button>
+            <>
+              <button
+                onClick={() => setShowSuggestions(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors"
+                style={{
+                  background: showSuggestions ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.15)',
+                  border: showSuggestions ? '1px solid rgba(99,102,241,0.6)' : '1px solid transparent',
+                  color: '#a5b4fc',
+                }}>
+                ✨ Sugerencias
+              </button>
+              <button onClick={() => { setQueueMode(false); setShowSearch(true); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
+                🔍 Buscar
+              </button>
+            </>
           )}
           {/* Agregar a la cola — visible cuando hay 2+ personas y el usuario está logueado */}
           {online >= 2 && user && (
@@ -1313,11 +1416,11 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
                   <>
                     <p className="text-xs text-indigo-400/70 font-semibold uppercase tracking-wide mb-3">✨ Para ti</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {suggestions.map(r => (
+                      {suggestions.map((r, i) => (
                         <button key={r.id}
                           onClick={() => queueMode
                             ? handleAddToQueue(r.id, r.title || '', r.thumbnail || '', r.platform || 'youtube')
-                            : changeVideo(r.id, r.platform)}
+                            : changeVideo(r.id, r.platform, i)}
                           disabled={queueMode && queueAdding}
                           className="flex flex-col rounded-xl overflow-hidden border border-white/5 hover:border-indigo-500/60 bg-white/[0.03] hover:bg-white/[0.06] transition-all text-left disabled:opacity-60">
                           {r.thumbnail
