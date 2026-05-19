@@ -414,8 +414,16 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     });
 
     socket.on('queue-play', ({ item }: { item: QueueItem }) => {
+      setIsPaused(false);
       if (iframeRef.current) {
         iframeRef.current.src = buildVideoUrl(item.platform || 'youtube', item.videoId);
+        // Belt-and-suspenders: send playVideo after the embed initializes (mobile browsers
+        // may not respect autoplay=1 on src changes triggered by non-user events).
+        setTimeout(() => {
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*'
+          );
+        }, 2000);
       } else {
         // Iframe not ready yet (Three.js still loading) — store and apply once it's mounted
         pendingQueuePlayRef.current = item;
@@ -1011,6 +1019,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     if (iframeRef.current) iframeRef.current.src = buildVideoUrl(plat || platform, videoId);
     socketRef.current?.emit('change-video', { roomId, videoId });
     setShowSearch(false); setSearchResults([]); setSearchQuery('');
+    setIsPaused(false); // Reset pause state on every video change
     if (suggIdx !== undefined) setCurrentSuggIdx(suggIdx);
   }
 
@@ -1243,7 +1252,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       {online === 1 && showSuggestions && !showSearch && (
         <div
           className="absolute z-20 left-0 right-0 flex flex-col"
-          style={{ bottom: '132px', background: 'rgba(6,6,22,0.93)', borderTop: '1px solid rgba(99,102,241,0.18)', borderBottom: '1px solid rgba(99,102,241,0.18)', backdropFilter: 'blur(16px)' }}
+          style={{ bottom: '124px', background: 'rgba(6,6,22,0.93)', borderTop: '1px solid rgba(99,102,241,0.18)', borderBottom: '1px solid rgba(99,102,241,0.18)', backdropFilter: 'blur(16px)' }}
           onClick={e => e.stopPropagation()}
         >
           {/* Header row */}
@@ -1308,70 +1317,82 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
         </div>
       )}
 
-      {/* Control panel */}
+      {/* Control panel — responsive: compact icons on mobile, full labels on desktop */}
       {!locked && !chatting && !showSearch && (
-        <div className="absolute z-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/10"
-          style={{ bottom: '72px', background: 'rgba(8,8,28,0.88)', backdropFilter: 'blur(14px)' }}
-          onClick={e => e.stopPropagation()}>
-          <button onClick={() => { isPaused ? sendYTCmd('playVideo') : sendYTCmd('pauseVideo'); setIsPaused(v => !v); }}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 text-white text-base transition-colors">
-            {isPaused ? '▶' : '⏸'}
-          </button>
-          <button onClick={() => { isMuted ? sendYTCmd('unMute') : sendYTCmd('mute'); setIsMuted(v => !v); }}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 text-lg transition-colors">
-            {isMuted ? '🔇' : '🔊'}
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 select-none">Vol</span>
-            <input type="range" min="0" max="100" value={volume}
-              onChange={e => { const v = Number(e.target.value); setVolume(v); sendYTCmd('setVolume', [v]); if (v > 0 && isMuted) { sendYTCmd('unMute'); setIsMuted(false); } }}
-              className="w-24 accent-indigo-500 cursor-pointer" />
-            <span className="text-xs text-slate-500 w-6 text-right select-none">{volume}</span>
-          </div>
-          <div className="w-px h-6 bg-white/10 mx-1" />
-          {/* Queue toggle — always visible */}
-          <button onClick={() => setShowQueue(v => !v)}
-            className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-xs font-medium transition-colors">
-            📋 Cola
-            {queue.length > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-500 text-[9px] font-black text-black flex items-center justify-center">
-                {queue.length > 9 ? '9+' : queue.length}
-              </span>
-            )}
-          </button>
-          {/* Solo mode: suggestions toggle + search */}
-          {online === 1 && (
-            <>
+        <div
+          className="absolute z-20 left-0 right-0 flex justify-center px-2"
+          style={{ bottom: '68px' }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 rounded-2xl border border-white/10 overflow-x-auto"
+            style={{ background: 'rgba(8,8,28,0.88)', backdropFilter: 'blur(14px)', scrollbarWidth: 'none', maxWidth: '100%' }}
+          >
+            {/* Play/Pause */}
+            <button
+              onClick={() => { isPaused ? sendYTCmd('playVideo') : sendYTCmd('pauseVideo'); setIsPaused(v => !v); }}
+              className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm sm:text-base transition-colors">
+              {isPaused ? '▶' : '⏸'}
+            </button>
+            {/* Mute */}
+            <button
+              onClick={() => { isMuted ? sendYTCmd('unMute') : sendYTCmd('mute'); setIsMuted(v => !v); }}
+              className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 text-base sm:text-lg transition-colors">
+              {isMuted ? '🔇' : '🔊'}
+            </button>
+            {/* Volume */}
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+              <span className="hidden sm:block text-xs text-slate-500 select-none">Vol</span>
+              <input type="range" min="0" max="100" value={volume}
+                onChange={e => { const v = Number(e.target.value); setVolume(v); sendYTCmd('setVolume', [v]); if (v > 0 && isMuted) { sendYTCmd('unMute'); setIsMuted(false); } }}
+                className="w-16 sm:w-24 accent-indigo-500 cursor-pointer" />
+              <span className="hidden sm:block text-xs text-slate-500 w-6 text-right select-none">{volume}</span>
+            </div>
+            <div className="w-px h-5 sm:h-6 bg-white/10 shrink-0" />
+            {/* Queue toggle */}
+            <button onClick={() => setShowQueue(v => !v)}
+              className="relative shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-xs font-medium transition-colors">
+              📋<span className="hidden sm:inline ml-1">Cola</span>
+              {queue.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-500 text-[9px] font-black text-black flex items-center justify-center">
+                  {queue.length > 9 ? '9+' : queue.length}
+                </span>
+              )}
+            </button>
+            {/* Solo mode: suggestions + search */}
+            {online === 1 && (<>
               <button
                 onClick={() => setShowSuggestions(v => !v)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors"
+                className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-colors"
                 style={{
                   background: showSuggestions ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.15)',
                   border: showSuggestions ? '1px solid rgba(99,102,241,0.6)' : '1px solid transparent',
                   color: '#a5b4fc',
                 }}>
-                ✨ Sugerencias
+                ✨<span className="hidden sm:inline ml-1">Sugerencias</span>
               </button>
               <button onClick={() => { setQueueMode(false); setShowSearch(true); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
-                🔍 Buscar
+                className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
+                🔍<span className="hidden sm:inline ml-1">Buscar</span>
               </button>
-            </>
-          )}
-          {/* Agregar a la cola — visible cuando hay 2+ personas y el usuario está logueado */}
-          {online >= 2 && user && (
-            <button onClick={() => { setQueueMode(true); setShowSearch(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
-              🎵 + Cola <span className="text-amber-400 font-bold">30🪙</span>
-            </button>
-          )}
-          {/* Skip — only when queue has items */}
-          {queue.length > 0 && user && (
-            <button onClick={handleSkipVideo}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors">
-              ⏭ Omitir <span className="text-amber-400 font-bold">1000🪙</span>
-            </button>
-          )}
+            </>)}
+            {/* Multi-user: add to queue */}
+            {online >= 2 && user && (
+              <button onClick={() => { setQueueMode(true); setShowSearch(true); }}
+                className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium transition-colors">
+                🎵<span className="hidden sm:inline ml-1">+ Cola</span>
+                <span className="hidden sm:inline text-amber-400 font-bold ml-0.5">30🪙</span>
+              </button>
+            )}
+            {/* Skip */}
+            {queue.length > 0 && user && (
+              <button onClick={handleSkipVideo}
+                className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors">
+                ⏭<span className="hidden sm:inline ml-1">Omitir</span>
+                <span className="hidden sm:inline text-amber-400 font-bold ml-0.5">1000🪙</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
