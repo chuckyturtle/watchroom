@@ -103,7 +103,7 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="bg-surface-900 flex flex-col" style={{ height: '100vh' }}>
+    <div className="bg-surface-900 flex flex-col" style={{ height: '100dvh' }}>
       <Navbar />
 
       <div className="flex-1 flex flex-col max-w-full min-h-0">
