@@ -216,6 +216,26 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   // Sync points from auth context (handles login/external updates)
   useEffect(() => { if (user?.points !== undefined) setRoomPoints(user.points); }, [user?.points]);
 
+  // Track the actual visible-area bottom offset via visualViewport so bottom-anchored
+  // elements clear the browser chrome (tabs bar) on BOTH Safari and Chrome mobile.
+  // --vp-bottom is set on the container element and combined with safe-area-inset-bottom
+  // via CSS max() so neither approach double-counts on any browser.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv || !containerRef.current) return;
+    const el = containerRef.current;
+
+    function sync() {
+      if (!vv) return;
+      const bottom = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+      el.style.setProperty('--vp-bottom', bottom + 'px');
+    }
+
+    vv.addEventListener('resize', sync);
+    sync();
+    return () => vv?.removeEventListener('resize', sync);
+  }, []);
+
   // Fetch fresh points on mount — use localStorage token as fallback in case
   // the auth context hasn't propagated yet
   useEffect(() => {
@@ -1126,12 +1146,12 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
         <>
           {/* Zone hint labels — subtle, pointer-events-none */}
           <div className="absolute z-10 pointer-events-none flex flex-col items-center gap-0.5 opacity-20"
-            style={{ left: '14px', bottom: 'calc(88px + env(safe-area-inset-bottom, 0px))' }}>
+            style={{ left: '14px', bottom: 'calc(88px + max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px)))' }}>
             <span className="text-3xl">🕹</span>
             <span className="text-white text-[11px] font-semibold">Mover</span>
           </div>
           <div className="absolute z-10 pointer-events-none flex flex-col items-center gap-0.5 opacity-20"
-            style={{ right: '14px', bottom: 'calc(88px + env(safe-area-inset-bottom, 0px))' }}>
+            style={{ right: '14px', bottom: 'calc(88px + max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px)))' }}>
             <span className="text-3xl">👁</span>
             <span className="text-white text-[11px] font-semibold">Mirar</span>
           </div>
@@ -1252,7 +1272,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       {online === 1 && showSuggestions && !showSearch && (
         <div
           className="absolute z-20 left-0 right-0 flex flex-col"
-          style={{ bottom: 'calc(120px + env(safe-area-inset-bottom, 0px))', background: 'rgba(6,6,22,0.93)', borderTop: '1px solid rgba(99,102,241,0.18)', borderBottom: '1px solid rgba(99,102,241,0.18)', backdropFilter: 'blur(16px)' }}
+          style={{ bottom: 'calc(120px + max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px)))', background: 'rgba(6,6,22,0.93)', borderTop: '1px solid rgba(99,102,241,0.18)', borderBottom: '1px solid rgba(99,102,241,0.18)', backdropFilter: 'blur(16px)' }}
           onClick={e => e.stopPropagation()}
         >
           {/* Header row */}
@@ -1321,7 +1341,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
       {!locked && !chatting && !showSearch && (
         <div
           className="absolute z-20 left-0 right-0 flex justify-center px-2"
-          style={{ bottom: 'calc(64px + env(safe-area-inset-bottom, 0px))' }}
+          style={{ bottom: 'calc(64px + max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px)))' }}
           onClick={e => e.stopPropagation()}
         >
           <div
@@ -1398,7 +1418,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
 
       {/* Search overlay */}
       {showSearch && (
-        <div className="absolute inset-0 z-30 flex flex-col" style={{ background: 'rgba(4,4,20,0.97)', paddingBottom: 'calc(68px + env(safe-area-inset-bottom, 0px))' }}
+        <div className="absolute inset-0 z-30 flex flex-col" style={{ background: 'rgba(4,4,20,0.97)', paddingBottom: 'calc(68px + max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px)))' }}
           onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5 shrink-0">
             <span className="text-xl">{queueMode ? '📋' : '🔍'}</span>
@@ -1501,7 +1521,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
 
       {/* Chat bar — padded for mobile browser chrome (safe-area-inset-bottom) */}
       <div className="absolute bottom-0 left-0 right-0 z-20"
-        style={{ background: 'rgba(4,4,18,0.82)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{ background: 'rgba(4,4,18,0.82)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--vp-bottom, 0px))' }}
         onClick={e => e.stopPropagation()}>
         {messages.length > 0 && (
           <div className="px-4 pt-1.5 pb-0 space-y-0.5">
