@@ -3,6 +3,86 @@ const { parse } = require('url');
 const next = require('next');
 const { Server } = require('socket.io');
 
+// ── Database bootstrap ────────────────────────────────────────────────────────
+// Strip 'channel_binding' from DATABASE_URL — Prisma's engine doesn't support it
+// and Neon adds it by default.
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL
+    .replace(/[?&]channel_binding=[^&]*/g, '')
+    .replace(/\?$/, '');
+}
+
+async function ensureSchema() {
+  const { PrismaClient } = require('@prisma/client');
+  const prisma = new PrismaClient({ log: ['error'] });
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "User" (
+        "id"                TEXT         NOT NULL,
+        "email"             TEXT         NOT NULL,
+        "username"          TEXT         NOT NULL,
+        "password"          TEXT         NOT NULL,
+        "bio"               TEXT,
+        "avatarColor"       TEXT         NOT NULL DEFAULT '#6366f1',
+        "points"            INTEGER      NOT NULL DEFAULT 0,
+        "isVerified"        BOOLEAN      NOT NULL DEFAULT false,
+        "verificationToken" TEXT,
+        "resetToken"        TEXT,
+        "resetTokenExpiry"  TIMESTAMP(3),
+        "createdAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key"    ON "User"("email");`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_username_key" ON "User"("username");`);
+
+    // Add points column if it was missing from a manually-created table
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "points" INTEGER NOT NULL DEFAULT 0;
+      EXCEPTION WHEN others THEN NULL; END; $$;
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Friendship" (
+        "id"          TEXT         NOT NULL,
+        "requesterId" TEXT         NOT NULL,
+        "addresseeId" TEXT         NOT NULL,
+        "status"      TEXT         NOT NULL DEFAULT 'PENDING',
+        "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Friendship_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "Friendship_requesterId_addresseeId_key"
+        ON "Friendship"("requesterId", "addresseeId");
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "Friendship"
+          ADD CONSTRAINT "Friendship_requesterId_fkey"
+          FOREIGN KEY ("requesterId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "Friendship"
+          ADD CONSTRAINT "Friendship_addresseeId_fkey"
+          FOREIGN KEY ("addresseeId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
+    console.log('✅ Database schema verified');
+  } catch (err) {
+    console.error('❌ Schema bootstrap failed:', err.message);
+    // Don't exit — maybe the tables already exist and we can still serve traffic
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -10,7 +90,7 @@ const port = parseInt(process.env.PORT || '3000', 10);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+ensureSchema().then(() => app.prepare()).then(() => {
   const httpServer = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
     await handle(req, res, parsedUrl);
