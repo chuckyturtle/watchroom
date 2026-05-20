@@ -9,11 +9,14 @@ interface VideoPlayerProps {
   id: string;
   onEnded?: () => void;
   blocked?: boolean;
+  title?: string;
+  thumbnail?: string;
 }
 
-export default function VideoPlayer({ platform, id, onEnded, blocked }: VideoPlayerProps) {
+export default function VideoPlayer({ platform, id, onEnded, blocked, title, thumbnail }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeRef    = useRef<HTMLIFrameElement>(null);
+  const isPausedRef  = useRef(false);
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 
   function getSrc(): string {
@@ -29,9 +32,15 @@ export default function VideoPlayer({ platform, id, onEnded, blocked }: VideoPla
     }
   }
 
-  // Detectar fin de video desde postMessage del iframe de YouTube
+  function sendCmd(func: string) {
+    iframeRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: 'command', func, args: [] }), '*'
+    );
+  }
+
+  // Track YouTube player state (playing/paused) and fire onEnded
   useEffect(() => {
-    if (platform !== 'youtube' || !onEnded) return;
+    if (platform !== 'youtube') return;
     function handleMessage(e: MessageEvent) {
       if (!e.data || typeof e.data !== 'string') return;
       let msg: any;
@@ -40,11 +49,47 @@ export default function VideoPlayer({ platform, id, onEnded, blocked }: VideoPla
         msg.event === 'onStateChange' ? msg.info :
         msg.event === 'infoDelivery'  ? msg.info?.playerState :
         undefined;
-      if (state === 0) onEnded!();
+      if (state === 1) isPausedRef.current = false; // playing
+      if (state === 2) isPausedRef.current = true;  // paused
+      if (state === 0 && onEnded) onEnded();        // ended
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [platform, id, onEnded]);
+
+  // Media Session API — shows media controls on lock screen and registers play/pause
+  useEffect(() => {
+    if (platform !== 'youtube' || !('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title || 'WatchRoom',
+        artist: 'WatchRoom',
+        artwork: thumbnail
+          ? [{ src: thumbnail, sizes: '512x512', type: 'image/jpeg' }]
+          : [],
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        sendCmd('playVideo');
+        isPausedRef.current = false;
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        sendCmd('pauseVideo');
+        isPausedRef.current = true;
+      });
+    } catch {}
+  }, [platform, title, thumbnail]);
+
+  // Resume playback when returning from lock screen or switching back to the tab
+  useEffect(() => {
+    if (platform !== 'youtube') return;
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible' && !isPausedRef.current) {
+        setTimeout(() => sendCmd('playVideo'), 700);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [platform]);
 
   const src = getSrc();
 

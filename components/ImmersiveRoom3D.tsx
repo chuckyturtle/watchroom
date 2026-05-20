@@ -133,6 +133,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   const [invite,         setInvite]        = useState<{ from: string; roomUrl: string } | null>(null);
   const [isMuted,        setIsMuted]       = useState(false);
   const [isPaused,       setIsPaused]      = useState(false);
+  const isPausedRef      = useRef(false);
   const [volume,         setVolume]        = useState(80);
   const [showSearch,     setShowSearch]    = useState(false);
   const [searchQuery,    setSearchQuery]   = useState('');
@@ -350,6 +351,7 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
   }, []);
 
   useEffect(() => {
+    isPausedRef.current = isPaused;
     window.dispatchEvent(new CustomEvent('wr-video-state', { detail: { playing: !isPaused } }));
   }, [isPaused]);
 
@@ -357,6 +359,41 @@ export default function ImmersiveRoom3D({ platform, contentId, roomId }: Props) 
     window.dispatchEvent(new CustomEvent('wr-video-state', { detail: { playing: true } }));
     return () => { window.dispatchEvent(new CustomEvent('wr-video-state', { detail: { playing: false } })); };
   }, []);
+
+  // Media Session API — lock screen controls + resume when returning from background
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Register media controls so the OS shows play/pause on lock screen
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: 'WatchRoom — Sala Inmersiva',
+          artist: 'WatchRoom',
+        });
+        navigator.mediaSession.setActionHandler('play', () => {
+          sendYTCmd('playVideo');
+          setIsPaused(false);
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          sendYTCmd('pauseVideo');
+          setIsPaused(true);
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+          if (queueRef.current.length > 0) socketRef.current?.emit('queue-advance');
+        });
+      } catch {}
+    }
+
+    // Resume playback when returning from lock screen or switching back to the app
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible' && !isPausedRef.current) {
+        setTimeout(() => sendYTCmd('playVideo'), 700);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [sendYTCmd]);
 
   // ── Socket.io ────────────────────────────────────────────────────────────────
   useEffect(() => {

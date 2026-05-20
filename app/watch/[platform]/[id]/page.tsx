@@ -414,7 +414,14 @@ export default function WatchPage() {
             )}
 
             <div className="relative">
-              <VideoPlayer platform={platform} id={currentId} onEnded={handleEnded} blocked={showSugg} />
+              <VideoPlayer
+                platform={platform}
+                id={currentId}
+                onEnded={handleEnded}
+                blocked={showSugg}
+                title={videoTitle}
+                thumbnail={`https://i.ytimg.com/vi/${currentId}/mqdefault.jpg`}
+              />
 
               {/* End-of-video overlay */}
               {showSugg && (
