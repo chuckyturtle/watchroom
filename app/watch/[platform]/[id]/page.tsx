@@ -25,7 +25,7 @@ const PLATFORM_LABELS: Record<Platform, { name: string; color: string; icon: str
   kick:    { name: 'Kick',    color: '#53fc18', icon: '🟢' },
 };
 
-const AUTOPLAY_SECS = 8;
+const AUTOPLAY_SECS = 4;
 
 function SidebarCard({ s, onPlay }: { s: Suggestion; onPlay: (s: Suggestion) => void }) {
   const [showPreview, setShowPreview] = useState(false);
@@ -119,10 +119,18 @@ export default function WatchPage() {
   const [searchQuery,   setSearchQuery]   = useState('');
   const [searchResults, setSearchResults] = useState<Suggestion[]>([]);
   const [searching,     setSearching]     = useState(false);
-  const countdownRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const countdownRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownActiveRef = useRef(false);
+  const nextVideoRef       = useRef<Suggestion | null>(null);
+  const searchInputRef     = useRef<HTMLInputElement>(null);
 
   const cfg = PLATFORM_LABELS[platform] || PLATFORM_LABELS.youtube;
+
+  // Reset autoplay state on every video change
+  useEffect(() => {
+    countdownActiveRef.current = false;
+    nextVideoRef.current = null;
+  }, [currentId]);
 
   // Fetch video info + save history
   useEffect(() => {
@@ -233,28 +241,70 @@ export default function WatchPage() {
   }, [videoTitle]);
 
   const handleEnded = useCallback(() => {
+    // Use already-loaded sidebar suggestions for instant autoplay (no fetch delay)
+    const pool = [...leftSuggs, ...rightSuggs].filter(s => s.id !== currentId);
+    if (pool.length > 0) {
+      setSuggestions(pool.slice(0, 6));
+      nextVideoRef.current = pool[0];
+    }
     setShowSugg(true);
     setCountdown(AUTOPLAY_SECS);
+    // Also refresh suggestions in background for the grid display
     fetchSuggestions(currentId);
-  }, [currentId, fetchSuggestions]);
+  }, [currentId, leftSuggs, rightSuggs, fetchSuggestions]);
 
+  // Update nextVideo when fresh suggestions arrive (without restarting the countdown)
   useEffect(() => {
-    if (!showSugg || suggestions.length === 0) return;
+    if (suggestions.length > 0 && !nextVideoRef.current) {
+      nextVideoRef.current = suggestions[0];
+    }
+  }, [suggestions]);
+
+  // Start countdown as soon as showSugg is true — only once per video end
+  useEffect(() => {
+    if (!showSugg || countdownActiveRef.current) return;
+    // Wait up to 1 tick for nextVideoRef to be populated, then start
+    const start = () => {
+      if (!nextVideoRef.current) return; // still loading, will retry via suggestions effect
+      countdownActiveRef.current = true;
+      countdownRef.current = setInterval(() => {
+        setCountdown(c => {
+          if (c <= 1) {
+            clearInterval(countdownRef.current!);
+            if (nextVideoRef.current) playSuggestion(nextVideoRef.current);
+            return 0;
+          }
+          return c - 1;
+        });
+      }, 1000);
+    };
+    start();
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSugg]);
+
+  // Trigger countdown start when suggestions arrive and showSugg is already true
+  useEffect(() => {
+    if (!showSugg || countdownActiveRef.current || suggestions.length === 0) return;
+    nextVideoRef.current = suggestions[0];
+    countdownActiveRef.current = true;
     countdownRef.current = setInterval(() => {
       setCountdown(c => {
         if (c <= 1) {
           clearInterval(countdownRef.current!);
-          playSuggestion(suggestions[0]);
+          if (nextVideoRef.current) playSuggestion(nextVideoRef.current);
           return 0;
         }
         return c - 1;
       });
     }, 1000);
-    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSugg, suggestions]);
 
   function playSuggestion(s: Suggestion) {
     if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownActiveRef.current = false;
+    nextVideoRef.current = null;
     setShowSugg(false);
     setSuggestions([]);
     setCurrentId(s.id);
@@ -263,6 +313,7 @@ export default function WatchPage() {
 
   function cancelAutoplay() {
     if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownActiveRef.current = false;
     setCountdown(0);
   }
 
