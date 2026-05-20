@@ -112,11 +112,15 @@ export default function WatchPage() {
   const [showSugg,     setShowSugg]     = useState(false);
   const [loadingSugg,  setLoadingSugg]  = useState(false);
   const [countdown,    setCountdown]    = useState(AUTOPLAY_SECS);
-  const [leftSuggs,    setLeftSuggs]    = useState<Suggestion[]>([]);
-  const [rightSuggs,   setRightSuggs]   = useState<Suggestion[]>([]);
-  const [loadingLeft,  setLoadingLeft]  = useState(false);
-  const [loadingRight, setLoadingRight] = useState(false);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [leftSuggs,     setLeftSuggs]     = useState<Suggestion[]>([]);
+  const [rightSuggs,    setRightSuggs]    = useState<Suggestion[]>([]);
+  const [loadingLeft,   setLoadingLeft]   = useState(false);
+  const [loadingRight,  setLoadingRight]  = useState(false);
+  const [searchQuery,   setSearchQuery]   = useState('');
+  const [searchResults, setSearchResults] = useState<Suggestion[]>([]);
+  const [searching,     setSearching]     = useState(false);
+  const countdownRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const cfg = PLATFORM_LABELS[platform] || PLATFORM_LABELS.youtube;
 
@@ -262,6 +266,24 @@ export default function WatchPage() {
     setCountdown(0);
   }
 
+  async function doSearch() {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchResults([]);
+    try {
+      const res  = await fetch(`/api/search/youtube?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setSearchResults((data.results || []).slice(0, 12));
+    } catch {}
+    setSearching(false);
+  }
+
+  function clearSearch() {
+    setSearchQuery('');
+    setSearchResults([]);
+  }
+
   if (!['youtube', 'twitch', 'kick'].includes(platform)) {
     return (
       <div className="min-h-screen bg-surface-900 flex items-center justify-center">
@@ -320,8 +342,79 @@ export default function WatchPage() {
           {/* Center: video + actions */}
           <div>
             {user && <PlaybackPointsTracker />}
+
+            {/* Search bar — above the video */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-9 py-2.5 text-white placeholder-slate-500 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  placeholder="Buscar otro video…"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') doSearch(); if (e.key === 'Escape') clearSearch(); }}
+                />
+                {searchQuery && (
+                  <button onClick={clearSearch}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xl leading-none transition-colors">
+                    ×
+                  </button>
+                )}
+              </div>
+              <button onClick={doSearch} disabled={searching || !searchQuery.trim()}
+                className="btn-primary px-5 py-2.5 text-sm disabled:opacity-50 shrink-0">
+                {searching ? '…' : 'Buscar'}
+              </button>
+            </div>
+
+            {/* Search results — shown instead of the video when active */}
+            {(searchResults.length > 0 || searching) && (
+              <div className="mb-4 rounded-2xl overflow-hidden border border-white/5 bg-white/[0.02] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-indigo-400/70 font-semibold uppercase tracking-wide">
+                    Resultados para &ldquo;{searchQuery}&rdquo;
+                  </p>
+                  <button onClick={clearSearch} className="text-xs text-slate-500 hover:text-white transition-colors">✕ Cerrar</button>
+                </div>
+                {searching ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="rounded-xl overflow-hidden border border-white/5">
+                        <div className="aspect-video bg-white/5 animate-pulse" />
+                        <div className="p-2 space-y-1.5">
+                          <div className="h-2.5 bg-white/5 rounded animate-pulse w-full" />
+                          <div className="h-2 bg-white/5 rounded animate-pulse w-2/3" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {searchResults.map(r => (
+                      <button key={r.id}
+                        onClick={() => { playSuggestion(r); clearSearch(); }}
+                        className="text-left rounded-xl overflow-hidden border border-white/5 hover:border-indigo-500/40 bg-white/[0.03] hover:bg-white/[0.06] transition-all">
+                        <div className="aspect-video relative bg-black">
+                          {r.thumbnail
+                            ? <img src={r.thumbnail} alt={r.title} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center text-slate-600 text-2xl">▶</div>
+                          }
+                        </div>
+                        <div className="p-2">
+                          <p className="text-white text-xs font-medium line-clamp-2 leading-snug">{r.title}</p>
+                          <p className="text-slate-500 text-[11px] truncate mt-0.5">{r.channel}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="relative">
-              <VideoPlayer platform={platform} id={currentId} onEnded={handleEnded} />
+              <VideoPlayer platform={platform} id={currentId} onEnded={handleEnded} blocked={showSugg} />
 
               {/* End-of-video overlay */}
               {showSugg && (
@@ -404,6 +497,49 @@ export default function WatchPage() {
                 </p>
               )}
             </div>
+
+            {/* Mobile suggestions — sidebars are desktop-only so we show this below the video on small screens */}
+            {isYT && (
+              <div className="mt-5 lg:hidden">
+                <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-3">✨ Sugerencias</p>
+                {(loadingLeft || loadingRight) ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="rounded-xl overflow-hidden border border-white/5">
+                        <div className="aspect-video bg-white/5 animate-pulse" />
+                        <div className="p-2 space-y-1.5">
+                          <div className="h-2.5 bg-white/5 rounded animate-pulse w-full" />
+                          <div className="h-2 bg-white/5 rounded animate-pulse w-2/3" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {[...leftSuggs, ...rightSuggs].slice(0, 8).map(s => (
+                      <button key={s.id} onClick={() => playSuggestion(s)}
+                        className="text-left rounded-xl overflow-hidden border border-white/5 hover:border-indigo-500/40 bg-white/[0.03] hover:bg-white/[0.06] transition-all">
+                        <div className="aspect-video relative bg-black">
+                          {s.thumbnail
+                            ? <img src={s.thumbnail} alt={s.title} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center text-slate-600 text-xl">▶</div>
+                          }
+                        </div>
+                        <div className="p-2">
+                          <p className="text-white text-xs font-medium line-clamp-2 leading-snug">{s.title}</p>
+                          <p className="text-slate-500 text-[11px] truncate mt-0.5">{s.channel}</p>
+                        </div>
+                      </button>
+                    ))}
+                    {!loadingLeft && !loadingRight && leftSuggs.length === 0 && rightSuggs.length === 0 && (
+                      <p className="col-span-2 text-center text-slate-600 text-xs py-6">
+                        Ve más videos para recibir sugerencias personalizadas
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Sala inmersiva CTA */}
             <div className="mt-6 p-6 rounded-2xl bg-gradient-to-r from-indigo-950/60 to-purple-950/60 border border-indigo-500/20">

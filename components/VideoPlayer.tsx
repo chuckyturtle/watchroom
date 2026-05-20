@@ -8,9 +8,10 @@ interface VideoPlayerProps {
   platform: Platform;
   id: string;
   onEnded?: () => void;
+  blocked?: boolean;
 }
 
-export default function VideoPlayer({ platform, id, onEnded }: VideoPlayerProps) {
+export default function VideoPlayer({ platform, id, onEnded, blocked }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
@@ -69,7 +70,7 @@ export default function VideoPlayer({ platform, id, onEnded }: VideoPlayerProps)
         ref={iframeRef}
         key={src}
         src={src}
-        className="w-full h-full"
+        className={`w-full h-full${blocked ? ' pointer-events-none' : ''}`}
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
         allowFullScreen
         title="Video player"
