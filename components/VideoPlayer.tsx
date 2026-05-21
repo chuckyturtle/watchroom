@@ -18,7 +18,13 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
   const [embedError, setEmbedError] = useState(false);
   const iframeRef    = useRef<HTMLIFrameElement>(null);
   const isPausedRef  = useRef(false);
+  const hasEndedRef  = useRef(false); // guard: fire onEnded at most once per video id
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+
+  // Reset guard whenever a new video loads
+  useEffect(() => {
+    hasEndedRef.current = false;
+  }, [id]);
 
   function getSrc(): string {
     switch (platform) {
@@ -52,7 +58,10 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
         undefined;
       if (state === 1) isPausedRef.current = false; // playing
       if (state === 2) isPausedRef.current = true;  // paused
-      if (state === 0 && onEnded) onEnded();        // ended
+      if (state === 0 && onEnded && !hasEndedRef.current) {
+        hasEndedRef.current = true;
+        onEnded();
+      }
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
