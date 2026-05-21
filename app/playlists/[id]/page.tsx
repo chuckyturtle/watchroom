@@ -48,6 +48,8 @@ export default function PlaylistPlayerPage() {
   const [mode, setMode] = useState<ShuffleMode>('sequence');
   const [order, setOrder] = useState<PlaylistItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  // resolved titles: videoId -> title (for items saved with the ID as title)
+  const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -58,6 +60,25 @@ export default function PlaylistPlayerPage() {
 
   useEffect(() => { orderRef.current = order; }, [order]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+
+  // Fetch real titles for items where the stored title looks like a raw YouTube ID
+  useEffect(() => {
+    if (!order.length) return;
+    const needsFetch = order.filter(
+      item => item.platform === 'youtube' && item.title === item.videoId
+    );
+    if (!needsFetch.length) return;
+    needsFetch.forEach(item => {
+      fetch(`/api/videoinfo/${item.videoId}`)
+        .then(r => r.json())
+        .then(info => {
+          if (info.title && info.title !== item.videoId) {
+            setResolvedTitles(prev => ({ ...prev, [item.videoId]: info.title }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [order]);
 
   useEffect(() => {
     if (!token) return;
@@ -247,12 +268,15 @@ export default function PlaylistPlayerPage() {
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
                   onEnded={goNext}
-                  title={currentItem.title}
+                  autoplay
+                  title={resolvedTitles[currentItem.videoId] || currentItem.title}
                   thumbnail={currentItem.thumbnail}
                 />
 
                 <div className="mt-4">
-                  <p className="text-white font-semibold text-base line-clamp-2">{currentItem.title}</p>
+                  <p className="text-white font-semibold text-base line-clamp-2">
+                    {resolvedTitles[currentItem.videoId] || currentItem.title}
+                  </p>
                   {currentItem.channel && (
                     <p className="text-slate-400 text-sm mt-1">{currentItem.channel}</p>
                   )}
@@ -309,7 +333,7 @@ export default function PlaylistPlayerPage() {
 
                   <div className="flex-1 min-w-0">
                     <p className={`text-xs font-medium line-clamp-2 leading-snug ${idx === currentIndex ? 'text-indigo-300' : 'text-slate-300'}`}>
-                      {item.title}
+                      {resolvedTitles[item.videoId] || item.title}
                     </p>
                     {item.channel && (
                       <p className="text-[11px] text-slate-600 truncate mt-0.5">{item.channel}</p>

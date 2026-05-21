@@ -11,9 +11,10 @@ interface VideoPlayerProps {
   blocked?: boolean;
   title?: string;
   thumbnail?: string;
+  autoplay?: boolean;
 }
 
-export default function VideoPlayer({ platform, id, onEnded, blocked, title, thumbnail }: VideoPlayerProps) {
+export default function VideoPlayer({ platform, id, onEnded, blocked, title, thumbnail, autoplay }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
   const iframeRef    = useRef<HTMLIFrameElement>(null);
   const isPausedRef  = useRef(false);
@@ -22,7 +23,7 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
   function getSrc(): string {
     switch (platform) {
       case 'youtube':
-        return `https://www.youtube.com/embed/${id}?rel=0&modestbranding=1&color=white&iv_load_policy=3&enablejsapi=1`;
+        return `https://www.youtube.com/embed/${id}?rel=0&modestbranding=1&color=white&iv_load_policy=3&enablejsapi=1${autoplay ? '&autoplay=1' : ''}`;
       case 'twitch':
         return `https://player.twitch.tv/?channel=${id}&parent=${appHost}&autoplay=false`;
       case 'kick':
