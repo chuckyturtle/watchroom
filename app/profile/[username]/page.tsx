@@ -1,11 +1,18 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { AVATAR_COLORS } from '@/lib/constants';
+
+interface PlaylistMeta {
+  id: string;
+  name: string;
+  itemCount: number;
+  updatedAt: string;
+}
 
 interface ProfileUser {
   id: string;
@@ -18,6 +25,7 @@ interface ProfileUser {
 
 export default function ProfilePage() {
   const params = useParams();
+  const router = useRouter();
   const username = params.username as string;
   const { user, token, updateUser } = useAuth();
 
@@ -33,6 +41,11 @@ export default function ProfilePage() {
       return saved ? (JSON.parse(saved)?.points ?? 0) : 0;
     } catch { return 0; }
   });
+
+  // Playlists
+  const [playlists,       setPlaylists]       = useState<PlaylistMeta[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [deletingPlaylist, setDeletingPlaylist] = useState<string | null>(null);
 
   // Edit mode
   const [editing, setEditing] = useState(false);
@@ -78,6 +91,17 @@ export default function ProfilePage() {
     if (user?.points !== undefined) setPoints(user.points);
   }, [user?.points]);
 
+  // Load playlists once isMe is known
+  useEffect(() => {
+    if (!isMe || !token) return;
+    setLoadingPlaylists(true);
+    fetch('/api/playlists', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setPlaylists(d.playlists || []))
+      .catch(() => {})
+      .finally(() => setLoadingPlaylists(false));
+  }, [isMe, token]);
+
   async function addFriend() {
     if (!token || !profile) return;
     const res = await fetch('/api/friends', {
@@ -105,6 +129,17 @@ export default function ProfilePage() {
       setTimeout(() => setSaveMsg(''), 3000);
     }
     setSaving(false);
+  }
+
+  async function deletePlaylist(id: string) {
+    if (!token) return;
+    setDeletingPlaylist(id);
+    await fetch(`/api/playlists/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setPlaylists(ps => ps.filter(p => p.id !== id));
+    setDeletingPlaylist(null);
   }
 
   if (notFound) {
@@ -286,6 +321,63 @@ export default function ProfilePage() {
             </>
           )}
         </div>
+
+        {/* Playlists section — only own profile */}
+        {isMe && (
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-white">Mis listas de reproducción</h2>
+              <Link href="/" className="text-xs text-indigo-400 hover:underline">
+                + Nueva lista
+              </Link>
+            </div>
+
+            {loadingPlaylists ? (
+              <div className="space-y-2">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="h-14 rounded-xl bg-white/5 animate-pulse" />
+                ))}
+              </div>
+            ) : playlists.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center">
+                <div className="text-3xl mb-2">📋</div>
+                <p className="text-slate-500 text-sm">No tienes listas de reproducción todavía.</p>
+                <p className="text-slate-600 text-xs mt-1">
+                  Guarda videos desde la página de reproducción con el botón &ldquo;💾 Guardar en lista&rdquo;.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {playlists.map(pl => (
+                  <div key={pl.id}
+                    className="flex items-center gap-3 rounded-xl bg-white/[0.03] border border-white/5 hover:border-indigo-500/30 transition-colors p-3 group">
+                    <button
+                      onClick={() => router.push(`/playlists/${pl.id}`)}
+                      className="flex-1 text-left min-w-0 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-600/20 flex items-center justify-center text-lg shrink-0">
+                        🎵
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{pl.name}</p>
+                        <p className="text-slate-500 text-xs mt-0.5">
+                          {pl.itemCount} {pl.itemCount === 1 ? 'video' : 'videos'}
+                          {' · '}
+                          {new Date(pl.updatedAt).toLocaleDateString('es', { day: 'numeric', month: 'short' })}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => deletePlaylist(pl.id)}
+                      disabled={deletingPlaylist === pl.id}
+                      className="shrink-0 opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all text-sm px-1 disabled:opacity-50">
+                      {deletingPlaylist === pl.id ? '...' : '🗑'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

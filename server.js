@@ -74,6 +74,45 @@ async function ensureSchema() {
       EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
     `);
 
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Playlist" (
+        "id"        TEXT         NOT NULL,
+        "userId"    TEXT         NOT NULL,
+        "name"      TEXT         NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Playlist_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "Playlist"
+          ADD CONSTRAINT "Playlist_userId_fkey"
+          FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "PlaylistItem" (
+        "id"         TEXT         NOT NULL,
+        "playlistId" TEXT         NOT NULL,
+        "videoId"    TEXT         NOT NULL,
+        "platform"   TEXT         NOT NULL DEFAULT 'youtube',
+        "title"      TEXT         NOT NULL,
+        "thumbnail"  TEXT         NOT NULL DEFAULT '',
+        "channel"    TEXT         NOT NULL DEFAULT '',
+        "position"   INTEGER      NOT NULL DEFAULT 0,
+        "addedAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PlaylistItem_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PlaylistItem"
+          ADD CONSTRAINT "PlaylistItem_playlistId_fkey"
+          FOREIGN KEY ("playlistId") REFERENCES "Playlist"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
     console.log('✅ Database schema verified');
   } catch (err) {
     console.error('❌ Schema bootstrap failed:', err.message);

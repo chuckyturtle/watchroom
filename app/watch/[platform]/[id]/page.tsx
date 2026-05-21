@@ -27,6 +27,12 @@ const PLATFORM_LABELS: Record<Platform, { name: string; color: string; icon: str
 
 const AUTOPLAY_SECS = 4;
 
+interface PlaylistMeta {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
 function SidebarCard({ s, onPlay }: { s: Suggestion; onPlay: (s: Suggestion) => void }) {
   const [showPreview, setShowPreview] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -100,7 +106,7 @@ function SidebarSkeleton() {
 export default function WatchPage() {
   const params   = useParams();
   const router   = useRouter();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
 
   const platform = params.platform as Platform;
   const initId   = params.id as string;
@@ -119,6 +125,15 @@ export default function WatchPage() {
   const [searchQuery,   setSearchQuery]   = useState('');
   const [searchResults, setSearchResults] = useState<Suggestion[]>([]);
   const [searching,     setSearching]     = useState(false);
+
+  // Playlist save
+  const [playlists,      setPlaylists]      = useState<PlaylistMeta[]>([]);
+  const [showSaveMenu,   setShowSaveMenu]   = useState(false);
+  const [savingToId,     setSavingToId]     = useState<string | null>(null);
+  const [saveMsg,        setSaveMsg]        = useState('');
+  const [newListName,    setNewListName]    = useState('');
+  const [creatingList,   setCreatingList]   = useState(false);
+  const saveMenuRef = useRef<HTMLDivElement>(null);
   const countdownRef       = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownActiveRef = useRef(false);
   const nextVideoRef       = useRef<Suggestion | null>(null);
@@ -315,6 +330,68 @@ export default function WatchPage() {
     if (countdownRef.current) clearInterval(countdownRef.current);
     countdownActiveRef.current = false;
     setCountdown(0);
+  }
+
+  // Load user playlists when save menu opens
+  useEffect(() => {
+    if (!showSaveMenu || !token) return;
+    fetch('/api/playlists', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setPlaylists(d.playlists || []))
+      .catch(() => {});
+  }, [showSaveMenu, token]);
+
+  // Close save menu on outside click
+  useEffect(() => {
+    if (!showSaveMenu) return;
+    function onDown(e: MouseEvent) {
+      if (saveMenuRef.current && !saveMenuRef.current.contains(e.target as Node)) {
+        setShowSaveMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [showSaveMenu]);
+
+  async function saveToPlaylist(playlistId: string) {
+    if (!token) return;
+    setSavingToId(playlistId);
+    const res = await fetch(`/api/playlists/${playlistId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        videoId: currentId,
+        platform,
+        title: videoTitle || currentId,
+        thumbnail: `https://i.ytimg.com/vi/${currentId}/mqdefault.jpg`,
+        channel: videoChannel,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setSaveMsg('¡Guardado!');
+    } else {
+      setSaveMsg(data.error || 'Error al guardar');
+    }
+    setSavingToId(null);
+    setShowSaveMenu(false);
+    setTimeout(() => setSaveMsg(''), 3000);
+  }
+
+  async function createAndSave() {
+    if (!token || !newListName.trim()) return;
+    setCreatingList(true);
+    // Create playlist
+    const r1 = await fetch('/api/playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: newListName.trim() }),
+    });
+    if (!r1.ok) { setCreatingList(false); return; }
+    const { playlist } = await r1.json();
+    await saveToPlaylist(playlist.id);
+    setNewListName('');
+    setCreatingList(false);
   }
 
   async function doSearch() {
@@ -548,6 +625,55 @@ export default function WatchPage() {
               <Link href={`/room/${platform}/${currentId}`} className="btn-primary gap-2 text-sm">
                 <span>🏠</span> Entrar a la sala inmersiva
               </Link>
+
+              {/* Save to playlist */}
+              {user && isYT && (
+                <div className="relative" ref={saveMenuRef}>
+                  <button
+                    onClick={() => setShowSaveMenu(v => !v)}
+                    className="btn-ghost text-sm gap-2">
+                    💾 Guardar en lista
+                  </button>
+                  {saveMsg && (
+                    <span className="absolute left-0 -bottom-7 text-xs text-green-400 whitespace-nowrap">{saveMsg}</span>
+                  )}
+                  {showSaveMenu && (
+                    <div className="absolute left-0 top-full mt-2 w-64 rounded-2xl bg-surface-800 border border-white/10 shadow-2xl z-50 overflow-hidden">
+                      {playlists.length > 0 && (
+                        <div className="max-h-48 overflow-y-auto">
+                          {playlists.map(pl => (
+                            <button key={pl.id}
+                              onClick={() => saveToPlaylist(pl.id)}
+                              disabled={savingToId === pl.id}
+                              className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 transition-colors flex items-center justify-between gap-2 disabled:opacity-50">
+                              <span className="truncate">{pl.name}</span>
+                              <span className="text-xs text-slate-600 shrink-0">{pl.itemCount} videos</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="border-t border-white/5 p-3 space-y-2">
+                        <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nueva lista</p>
+                        <input
+                          className="input text-sm py-2"
+                          placeholder="Nombre de la lista…"
+                          value={newListName}
+                          onChange={e => setNewListName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') createAndSave(); }}
+                          maxLength={60}
+                        />
+                        <button
+                          onClick={createAndSave}
+                          disabled={creatingList || !newListName.trim()}
+                          className="btn-primary w-full text-sm disabled:opacity-50">
+                          {creatingList ? 'Creando...' : '+ Crear y guardar'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {!user && (
                 <p className="text-slate-500 text-sm">
                   <Link href="/login" className="text-indigo-400 hover:underline">Inicia sesión</Link>{' '}
