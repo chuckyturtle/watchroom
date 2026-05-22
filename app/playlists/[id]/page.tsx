@@ -268,6 +268,8 @@ export default function PlaylistPlayerPage() {
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
                   onEnded={goNext}
+                  onNextTrack={goNext}
+                  onPrevTrack={goPrev}
                   onVideoData={({ title }) =>
                     setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }))
                   }

@@ -9,6 +9,8 @@ interface VideoPlayerProps {
   id: string;
   onEnded?: () => void;
   onVideoData?: (data: { title: string; author: string }) => void;
+  onNextTrack?: () => void;
+  onPrevTrack?: () => void;
   blocked?: boolean;
   title?: string;
   thumbnail?: string;
@@ -44,7 +46,7 @@ function loadYouTubeAPI(): Promise<void> {
 }
 
 export default function VideoPlayer({
-  platform, id, onEnded, onVideoData, blocked, title, thumbnail, autoplay,
+  platform, id, onEnded, onVideoData, onNextTrack, onPrevTrack, blocked, title, thumbnail, autoplay,
 }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
   const containerRef   = useRef<HTMLDivElement>(null);
@@ -56,10 +58,14 @@ export default function VideoPlayer({
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 
   // Keep callback refs current so closures inside YT events never go stale
-  const onEndedRef    = useRef(onEnded);
+  const onEndedRef     = useRef(onEnded);
   const onVideoDataRef = useRef(onVideoData);
-  useEffect(() => { onEndedRef.current = onEnded; },    [onEnded]);
+  const onNextTrackRef = useRef(onNextTrack);
+  const onPrevTrackRef = useRef(onPrevTrack);
+  useEffect(() => { onEndedRef.current     = onEnded;     }, [onEnded]);
   useEffect(() => { onVideoDataRef.current = onVideoData; }, [onVideoData]);
+  useEffect(() => { onNextTrackRef.current = onNextTrack; }, [onNextTrack]);
+  useEffect(() => { onPrevTrackRef.current = onPrevTrack; }, [onPrevTrack]);
 
   // ── YouTube IFrame API ────────────────────────────────────────────────────
   useEffect(() => {
@@ -169,8 +175,20 @@ export default function VideoPlayer({
       });
       navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
       navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
+
+      // Next / previous track — shown as ⏭ ⏮ on the lock screen
+      if (onNextTrackRef.current) {
+        navigator.mediaSession.setActionHandler('nexttrack', () => onNextTrackRef.current?.());
+      } else {
+        try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
+      }
+      if (onPrevTrackRef.current) {
+        navigator.mediaSession.setActionHandler('previoustrack', () => onPrevTrackRef.current?.());
+      } else {
+        try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
+      }
     } catch {}
-  }, [platform, title, thumbnail, sendCmd]);
+  }, [platform, title, thumbnail, sendCmd, onNextTrack, onPrevTrack]);
 
   // ── Resume on tab/app focus ───────────────────────────────────────────────
   useEffect(() => {
