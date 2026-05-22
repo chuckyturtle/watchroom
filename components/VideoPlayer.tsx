@@ -73,6 +73,8 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
 
       player = new window.YT.Player(div, {
         videoId: id,
+        width: '100%',
+        height: '100%',
         playerVars: {
           rel: 0,
           modestbranding: 1,
@@ -84,6 +86,15 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
         events: {
           onReady(e: any) {
             playerRef.current = e.target;
+            // Ensure the generated iframe fills the container
+            const iframe = e.target.getIframe?.();
+            if (iframe) {
+              iframe.style.width = '100%';
+              iframe.style.height = '100%';
+              iframe.style.position = 'absolute';
+              iframe.style.top = '0';
+              iframe.style.left = '0';
+            }
             if (autoplay) e.target.playVideo();
           },
           onStateChange(e: any) {
@@ -186,7 +197,7 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
   return (
     <div className={`w-full aspect-video bg-black rounded-xl overflow-hidden${blocked ? ' pointer-events-none' : ''}`}>
       {/* containerRef: YouTube IFrame API replaces this div's contents */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="relative w-full h-full" />
     </div>
   );
 }
