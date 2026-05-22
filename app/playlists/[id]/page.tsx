@@ -48,7 +48,7 @@ export default function PlaylistPlayerPage() {
   const [mode, setMode] = useState<ShuffleMode>('sequence');
   const [order, setOrder] = useState<PlaylistItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  // resolved titles: videoId -> title (for items saved with the ID as title)
+  // resolved titles: videoId -> title (populated from YT player or oEmbed)
   const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState('');
@@ -61,19 +61,19 @@ export default function PlaylistPlayerPage() {
   useEffect(() => { orderRef.current = order; }, [order]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
-  // Fetch real titles for items where the stored title looks like a raw YouTube ID
+  // Fetch real titles via YouTube oEmbed (free, no API key) for items stored with raw ID as title
   useEffect(() => {
     if (!order.length) return;
     const needsFetch = order.filter(
-      item => item.platform === 'youtube' && item.title === item.videoId
+      item => item.platform === 'youtube' && /^[A-Za-z0-9_-]{10,12}$/.test(item.title)
     );
     if (!needsFetch.length) return;
     needsFetch.forEach(item => {
-      fetch(`/api/videoinfo/${item.videoId}`)
+      fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${item.videoId}&format=json`)
         .then(r => r.json())
-        .then(info => {
-          if (info.title && info.title !== item.videoId) {
-            setResolvedTitles(prev => ({ ...prev, [item.videoId]: info.title }));
+        .then((info: { title?: string; author_name?: string }) => {
+          if (info.title) {
+            setResolvedTitles(prev => ({ ...prev, [item.videoId]: info.title! }));
           }
         })
         .catch(() => {});
@@ -268,6 +268,9 @@ export default function PlaylistPlayerPage() {
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
                   onEnded={goNext}
+                  onVideoData={({ title }) =>
+                    setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }))
+                  }
                   autoplay
                   title={resolvedTitles[currentItem.videoId] || currentItem.title}
                   thumbnail={currentItem.thumbnail}

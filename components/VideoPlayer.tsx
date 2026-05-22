@@ -8,6 +8,7 @@ interface VideoPlayerProps {
   platform: Platform;
   id: string;
   onEnded?: () => void;
+  onVideoData?: (data: { title: string; author: string }) => void;
   blocked?: boolean;
   title?: string;
   thumbnail?: string;
@@ -45,7 +46,7 @@ function loadYouTubeAPI(): Promise<void> {
   });
 }
 
-export default function VideoPlayer({ platform, id, onEnded, blocked, title, thumbnail, autoplay }: VideoPlayerProps) {
+export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocked, title, thumbnail, autoplay }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
   const containerRef  = useRef<HTMLDivElement>(null);
   const iframeRef     = useRef<HTMLIFrameElement>(null);
@@ -94,6 +95,11 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
               iframe.style.position = 'absolute';
               iframe.style.top = '0';
               iframe.style.left = '0';
+            }
+            // Report real title/author from the player (no extra API call needed)
+            const data = e.target.getVideoData?.();
+            if (data?.title && onVideoData) {
+              onVideoData({ title: data.title, author: data.author || '' });
             }
             if (autoplay) e.target.playVideo();
           },
