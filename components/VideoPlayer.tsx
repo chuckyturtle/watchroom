@@ -15,7 +15,6 @@ interface VideoPlayerProps {
   autoplay?: boolean;
 }
 
-// Global registry so we only load the YouTube IFrame API script once
 declare global {
   interface Window {
     YT: any;
@@ -28,10 +27,8 @@ function loadYouTubeAPI(): Promise<void> {
   return new Promise(resolve => {
     if (typeof window === 'undefined') return;
     if (window.YT?.Player) { resolve(); return; }
-
     if (!window._ytReadyCallbacks) window._ytReadyCallbacks = [];
     window._ytReadyCallbacks.push(resolve);
-
     if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
       const prev = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
@@ -46,33 +43,52 @@ function loadYouTubeAPI(): Promise<void> {
   });
 }
 
-export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocked, title, thumbnail, autoplay }: VideoPlayerProps) {
+export default function VideoPlayer({
+  platform, id, onEnded, onVideoData, blocked, title, thumbnail, autoplay,
+}: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
-  const containerRef  = useRef<HTMLDivElement>(null);
-  const iframeRef     = useRef<HTMLIFrameElement>(null);
-  const playerRef     = useRef<any>(null);
-  const isPausedRef   = useRef(false);
-  const hasEndedRef   = useRef(false);
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const iframeRef      = useRef<HTMLIFrameElement>(null);
+  const playerRef      = useRef<any>(null);
+  const playerReadyRef = useRef(false);
+  const isPausedRef    = useRef(false);
+  const hasEndedRef    = useRef(false);
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 
-  // ── YouTube IFrame API player (reliable onStateChange) ────────────────────
+  // Keep callback refs current so closures inside YT events never go stale
+  const onEndedRef    = useRef(onEnded);
+  const onVideoDataRef = useRef(onVideoData);
+  useEffect(() => { onEndedRef.current = onEnded; },    [onEnded]);
+  useEffect(() => { onVideoDataRef.current = onVideoData; }, [onVideoData]);
+
+  // ── YouTube IFrame API ────────────────────────────────────────────────────
   useEffect(() => {
     if (platform !== 'youtube') return;
 
-    let player: any = null;
-    let destroyed = false;
-
     hasEndedRef.current = false;
 
-    loadYouTubeAPI().then(() => {
-      if (destroyed || !containerRef.current) return;
+    // ── If player already exists and is ready: reuse it (keeps iOS media
+    //    session alive — avoids gesture-block on next video) ─────────────────
+    if (playerRef.current && playerReadyRef.current) {
+      if (autoplay) {
+        playerRef.current.loadVideoById(id);   // loads + plays immediately
+      } else {
+        playerRef.current.cueVideoById(id);    // loads but doesn't play
+      }
+      return;
+    }
 
-      // Create a fresh div inside the container for YT.Player to replace
+    // ── First mount: create the YT.Player ────────────────────────────────
+    let cancelled = false;
+
+    loadYouTubeAPI().then(() => {
+      if (cancelled || !containerRef.current) return;
+
       const div = document.createElement('div');
       containerRef.current.innerHTML = '';
       containerRef.current.appendChild(div);
 
-      player = new window.YT.Player(div, {
+      const player = new window.YT.Player(div, {
         videoId: id,
         width: '100%',
         height: '100%',
@@ -81,62 +97,61 @@ export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocke
           modestbranding: 1,
           iv_load_policy: 3,
           enablejsapi: 1,
+          playsinline: 1,          // iOS: play inline, not forced fullscreen
           autoplay: autoplay ? 1 : 0,
           origin: window.location.origin,
         },
         events: {
           onReady(e: any) {
+            playerReadyRef.current = true;
             playerRef.current = e.target;
-            // Ensure the generated iframe fills the container
-            const iframe = e.target.getIframe?.();
+            // Make the generated iframe fill the container
+            const iframe: HTMLIFrameElement | undefined = e.target.getIframe?.();
             if (iframe) {
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
+              iframe.style.width    = '100%';
+              iframe.style.height   = '100%';
               iframe.style.position = 'absolute';
-              iframe.style.top = '0';
-              iframe.style.left = '0';
-            }
-            // Report real title/author from the player (no extra API call needed)
-            const data = e.target.getVideoData?.();
-            if (data?.title && onVideoData) {
-              onVideoData({ title: data.title, author: data.author || '' });
+              iframe.style.top      = '0';
+              iframe.style.left     = '0';
             }
             if (autoplay) e.target.playVideo();
           },
           onStateChange(e: any) {
             const s: number = e.data;
-            if (s === 1) { isPausedRef.current = false; }
-            if (s === 2) { isPausedRef.current = true; }
-            if (s === 0 && onEnded && !hasEndedRef.current) {
+            if (s === 1) {
+              isPausedRef.current = false;
+              // Report real title/author every time a video starts playing
+              const data = e.target.getVideoData?.();
+              if (data?.title) onVideoDataRef.current?.({ title: data.title, author: data.author || '' });
+            }
+            if (s === 2) isPausedRef.current = true;
+            if (s === 0 && !hasEndedRef.current) {
               hasEndedRef.current = true;
-              onEnded();
+              onEndedRef.current?.();
             }
           },
-          onError() {
-            setEmbedError(true);
-          },
+          onError() { setEmbedError(true); },
         },
       });
       playerRef.current = player;
     });
 
-    return () => {
-      destroyed = true;
-      try { player?.destroy(); } catch {}
-      playerRef.current = null;
-    };
+    return () => { cancelled = true; };
+  // Only re-run when id or platform changes — NOT on callback changes
+  // (callbacks are kept fresh via refs above)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, id]);
 
-  // Separate effect to keep onEnded and autoplay handlers current without
-  // recreating the player (which would reset playback)
+  // Destroy player only when component unmounts or platform changes away from youtube
   useEffect(() => {
-    // Nothing to do — onStateChange/onReady already capture these via closure.
-    // The player is recreated whenever `id` changes (effect above), so stale
-    // closures aren't an issue.
-  }, [onEnded, autoplay]);
+    return () => {
+      try { playerRef.current?.destroy(); } catch {}
+      playerRef.current    = null;
+      playerReadyRef.current = false;
+    };
+  }, [platform]);
 
-  // ── Helper to send commands via the YT Player API ────────────────────────
+  // ── Commands helper (used by media session / visibility handlers) ─────────
   const sendCmd = useCallback((fn: string) => {
     const p = playerRef.current;
     if (!p) return;
@@ -152,12 +167,12 @@ export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocke
         artist: 'WatchRoom',
         artwork: thumbnail ? [{ src: thumbnail, sizes: '512x512', type: 'image/jpeg' }] : [],
       });
-      navigator.mediaSession.setActionHandler('play', () => { sendCmd('playVideo'); isPausedRef.current = false; });
+      navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
       navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
     } catch {}
   }, [platform, title, thumbnail, sendCmd]);
 
-  // ── Resume on tab focus ───────────────────────────────────────────────────
+  // ── Resume on tab/app focus ───────────────────────────────────────────────
   useEffect(() => {
     if (platform !== 'youtube') return;
     function onVisChange() {
@@ -169,7 +184,7 @@ export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocke
     return () => document.removeEventListener('visibilitychange', onVisChange);
   }, [platform, sendCmd]);
 
-  // ── Non-YouTube platforms (Twitch / Kick) — plain iframe ─────────────────
+  // ── Non-YouTube platforms — plain iframe ──────────────────────────────────
   if (platform !== 'youtube') {
     const src = platform === 'twitch'
       ? `https://player.twitch.tv/?channel=${id}&parent=${appHost}&autoplay=false`
@@ -202,7 +217,6 @@ export default function VideoPlayer({ platform, id, onEnded, onVideoData, blocke
 
   return (
     <div className={`w-full aspect-video bg-black rounded-xl overflow-hidden${blocked ? ' pointer-events-none' : ''}`}>
-      {/* containerRef: YouTube IFrame API replaces this div's contents */}
       <div ref={containerRef} className="relative w-full h-full" />
     </div>
   );
