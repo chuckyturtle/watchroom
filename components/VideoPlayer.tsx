@@ -52,6 +52,13 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
       if (!e.data || typeof e.data !== 'string') return;
       let msg: any;
       try { msg = JSON.parse(e.data); } catch { return; }
+
+      // When player is ready: trigger playVideo if autoplay requested.
+      // This handles browsers that block autoplay=1 in the URL.
+      if (msg.event === 'onReady' && autoplay) {
+        sendCmd('playVideo');
+      }
+
       const state: number | undefined =
         msg.event === 'onStateChange' ? msg.info :
         msg.event === 'infoDelivery'  ? msg.info?.playerState :
@@ -65,7 +72,7 @@ export default function VideoPlayer({ platform, id, onEnded, blocked, title, thu
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [platform, id, onEnded]);
+  }, [platform, id, onEnded, autoplay]);
 
   // Media Session API — shows media controls on lock screen and registers play/pause
   useEffect(() => {
