@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import Navbar from '@/components/Navbar';
 
 const HomeRecommendations = dynamic(() => import('@/components/HomeRecommendations'), { ssr: false });
+const HomeDiscoverPlaylists = dynamic(() => import('@/components/HomeDiscoverPlaylists'), { ssr: false });
 
 type Platform = 'youtube' | 'twitch' | 'kick';
 
@@ -187,6 +188,7 @@ export default function HomePage() {
               <p className="text-slate-600 text-sm mt-2">Sin anuncios, en grupo y de forma inmersiva</p>
             </div>
             <HomeRecommendations />
+            <HomeDiscoverPlaylists />
           </>
         )}
 

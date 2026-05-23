@@ -50,10 +50,15 @@ export default function PlaylistPlayerPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   // resolved titles: videoId -> title (populated from YT player or oEmbed)
   const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [savingName, setSavingName] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [isRenaming,  setIsRenaming]  = useState(false);
+  const [newName,     setNewName]     = useState('');
+  const [savingName,  setSavingName]  = useState(false);
+  const [removingId,  setRemovingId]  = useState<string | null>(null);
+
+  // Publish state
+  const [pubId,       setPubId]       = useState<string | null>(null);
+  const [publishing,  setPublishing]  = useState(false);
+  const [pubMsg,      setPubMsg]      = useState('');
 
   const orderRef = useRef<PlaylistItem[]>([]);
   const currentIndexRef = useRef(0);
@@ -94,6 +99,7 @@ export default function PlaylistPlayerPage() {
         if (!d?.playlist) return;
         setPlaylist(d.playlist);
         setNewName(d.playlist.name);
+        if (d.playlist.published?.id) setPubId(d.playlist.published.id);
         const sorted = [...d.playlist.items].sort((a, b) => a.position - b.position);
         setOrder(sorted);
         setLoading(false);
@@ -122,6 +128,25 @@ export default function PlaylistPlayerPage() {
   const goPrev = useCallback(() => {
     setCurrentIndex(i => (i > 0 ? i - 1 : orderRef.current.length - 1));
   }, []);
+
+  async function handlePublish() {
+    if (!token) return;
+    setPublishing(true);
+    const method = pubId ? 'PATCH' : 'POST';
+    const res = await fetch(`/api/playlists/${playlistId}/publish`, {
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (!pubId && data.pubId) setPubId(data.pubId);
+      setPubMsg(pubId ? '¡Playlist actualizado en el discover!' : '¡Publicado para toda la comunidad!');
+    } else {
+      setPubMsg(data.error || 'Error al publicar');
+    }
+    setPublishing(false);
+    setTimeout(() => setPubMsg(''), 4000);
+  }
 
   async function renamePlaylist() {
     if (!token || !newName.trim()) return;
@@ -245,8 +270,8 @@ export default function PlaylistPlayerPage() {
           <span className="text-slate-500 text-sm shrink-0">{playlist.items.length} videos</span>
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex items-center gap-2 mb-5">
+        {/* Mode toggle + publish */}
+        <div className="flex flex-wrap items-center gap-2 mb-5">
           <button
             onClick={() => setMode('sequence')}
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${mode === 'sequence' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
@@ -257,7 +282,28 @@ export default function PlaylistPlayerPage() {
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${mode === 'shuffle' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
             🔀 Aleatorio
           </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            {pubId && (
+              <Link href={`/discover/${pubId}`}
+                className="text-xs text-indigo-400 hover:underline shrink-0">
+                Ver en discover →
+              </Link>
+            )}
+            <button
+              onClick={handlePublish}
+              disabled={publishing}
+              className="btn-primary text-sm px-4 disabled:opacity-50">
+              {publishing ? '...' : pubId ? '🔄 Actualizar en discover' : '🌐 Publicar playlist'}
+            </button>
+          </div>
         </div>
+
+        {pubMsg && (
+          <div className={`mb-4 px-4 py-2 rounded-xl text-sm ${pubMsg.startsWith('Error') || pubMsg.startsWith('¡Error') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+            {pubMsg}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 items-start">
           {/* Player */}

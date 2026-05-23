@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const playlist = await prisma.playlist.findFirst({
     where: { id: params.id, userId: user.userId },
-    include: { items: { orderBy: { position: 'asc' } } },
+    include: { items: { orderBy: { position: 'asc' } }, published: { select: { id: true } } },
   });
   if (!playlist) return NextResponse.json({ error: 'No encontrada' }, { status: 404 });
 

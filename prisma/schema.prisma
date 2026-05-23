@@ -23,11 +23,13 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  sentRequests     Friendship[] @relation("Requester")
-  receivedRequests Friendship[] @relation("Addressee")
-  playlists        Playlist[]
+  sentRequests       Friendship[]        @relation("Requester")
+  receivedRequests   Friendship[]        @relation("Addressee")
+  playlists          Playlist[]
+  publishedPlaylists PublishedPlaylist[]
+  playlistVotes      PlaylistVote[]
+  savedPlaylists     SavedPlaylist[]
 }
-
 
 model Playlist {
   id        String         @id @default(cuid())
@@ -37,6 +39,7 @@ model Playlist {
   updatedAt DateTime       @updatedAt
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     PlaylistItem[]
+  published PublishedPlaylist?
 }
 
 model PlaylistItem {
@@ -50,6 +53,61 @@ model PlaylistItem {
   position   Int      @default(0)
   addedAt    DateTime @default(now())
   playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+}
+
+model PublishedPlaylist {
+  id          String   @id @default(cuid())
+  playlistId  String   @unique
+  userId      String
+  name        String
+  rating      Int      @default(0)
+  publishedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  playlist Playlist               @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    PublishedPlaylistItem[]
+  votes    PlaylistVote[]
+  saves    SavedPlaylist[]
+}
+
+model PublishedPlaylistItem {
+  id                  String @id @default(cuid())
+  publishedPlaylistId String
+  videoId             String
+  platform            String @default("youtube")
+  title               String
+  thumbnail           String @default("")
+  channel             String @default("")
+  position            Int    @default(0)
+
+  publishedPlaylist PublishedPlaylist @relation(fields: [publishedPlaylistId], references: [id], onDelete: Cascade)
+}
+
+model PlaylistVote {
+  id                  String   @id @default(cuid())
+  publishedPlaylistId String
+  userId              String
+  createdAt           DateTime @default(now())
+
+  publishedPlaylist PublishedPlaylist @relation(fields: [publishedPlaylistId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([publishedPlaylistId, userId])
+}
+
+model SavedPlaylist {
+  id                  String   @id @default(cuid())
+  userId              String
+  publishedPlaylistId String
+  localPlaylistId     String?
+  lastSyncedAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  publishedPlaylist PublishedPlaylist @relation(fields: [publishedPlaylistId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, publishedPlaylistId])
 }
 
 // status: "PENDING" | "ACCEPTED" | "DECLINED"

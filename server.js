@@ -113,6 +113,101 @@ async function ensureSchema() {
       EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
     `);
 
+    // ── PublishedPlaylist ──────────────────────────────────────────────────
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "PublishedPlaylist" (
+        "id"          TEXT         NOT NULL,
+        "playlistId"  TEXT         NOT NULL,
+        "userId"      TEXT         NOT NULL,
+        "name"        TEXT         NOT NULL,
+        "rating"      INTEGER      NOT NULL DEFAULT 0,
+        "publishedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PublishedPlaylist_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "PublishedPlaylist_playlistId_key" ON "PublishedPlaylist"("playlistId");`);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PublishedPlaylist" ADD CONSTRAINT "PublishedPlaylist_playlistId_fkey"
+          FOREIGN KEY ("playlistId") REFERENCES "Playlist"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PublishedPlaylist" ADD CONSTRAINT "PublishedPlaylist_userId_fkey"
+          FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "PublishedPlaylistItem" (
+        "id"                  TEXT    NOT NULL,
+        "publishedPlaylistId" TEXT    NOT NULL,
+        "videoId"             TEXT    NOT NULL,
+        "platform"            TEXT    NOT NULL DEFAULT 'youtube',
+        "title"               TEXT    NOT NULL,
+        "thumbnail"           TEXT    NOT NULL DEFAULT '',
+        "channel"             TEXT    NOT NULL DEFAULT '',
+        "position"            INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT "PublishedPlaylistItem_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PublishedPlaylistItem" ADD CONSTRAINT "PublishedPlaylistItem_publishedPlaylistId_fkey"
+          FOREIGN KEY ("publishedPlaylistId") REFERENCES "PublishedPlaylist"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "PlaylistVote" (
+        "id"                  TEXT         NOT NULL,
+        "publishedPlaylistId" TEXT         NOT NULL,
+        "userId"              TEXT         NOT NULL,
+        "createdAt"           TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "PlaylistVote_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "PlaylistVote_publishedPlaylistId_userId_key" ON "PlaylistVote"("publishedPlaylistId","userId");`);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PlaylistVote" ADD CONSTRAINT "PlaylistVote_publishedPlaylistId_fkey"
+          FOREIGN KEY ("publishedPlaylistId") REFERENCES "PublishedPlaylist"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "PlaylistVote" ADD CONSTRAINT "PlaylistVote_userId_fkey"
+          FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "SavedPlaylist" (
+        "id"                  TEXT         NOT NULL,
+        "userId"              TEXT         NOT NULL,
+        "publishedPlaylistId" TEXT         NOT NULL,
+        "localPlaylistId"     TEXT,
+        "lastSyncedAt"        TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "createdAt"           TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "SavedPlaylist_pkey" PRIMARY KEY ("id")
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "SavedPlaylist_userId_publishedPlaylistId_key" ON "SavedPlaylist"("userId","publishedPlaylistId");`);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "SavedPlaylist" ADD CONSTRAINT "SavedPlaylist_publishedPlaylistId_fkey"
+          FOREIGN KEY ("publishedPlaylistId") REFERENCES "PublishedPlaylist"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        ALTER TABLE "SavedPlaylist" ADD CONSTRAINT "SavedPlaylist_userId_fkey"
+          FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+    `);
+
     console.log('✅ Database schema verified');
   } catch (err) {
     console.error('❌ Schema bootstrap failed:', err.message);
