@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import VideoCard from './VideoCard';
-import { getHistory, clearHistory, buildTasteProfile, HistoryItem } from '@/lib/watchHistory';
+import { getHistory, saveToHistory, clearHistory, buildTasteProfile, HistoryItem } from '@/lib/watchHistory';
 
 interface SearchResult {
   id: string;
@@ -20,6 +20,36 @@ export default function HomeRecommendations() {
 
   useEffect(() => {
     const h = getHistory();
+
+    // Fix stale history entries: missing thumbnail or ID-like title
+    const needsFix = h.filter(
+      item => item.platform === 'youtube' && (
+        !item.thumbnail ||
+        /^[A-Za-z0-9_-]{10,12}$/.test(item.title)
+      )
+    );
+
+    if (needsFix.length > 0) {
+      needsFix.forEach(item => {
+        fetch(`/api/videoinfo/${item.id}`)
+          .then(r => r.json())
+          .then(info => {
+            if (!info.title || /^[A-Za-z0-9_-]{10,12}$/.test(info.title)) return;
+            saveToHistory({
+              id: item.id,
+              platform: item.platform,
+              title: info.title,
+              thumbnail: info.thumbnail || item.thumbnail,
+              channel: info.channel || item.channel,
+              views: info.views ?? item.views,
+              duration: info.duration ?? item.duration,
+            });
+            setHistory(getHistory());
+          })
+          .catch(() => {});
+      });
+    }
+
     setHistory(h);
 
     if (h.length === 0) return;
