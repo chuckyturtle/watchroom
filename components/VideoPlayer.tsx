@@ -129,6 +129,8 @@ export default function VideoPlayer({
               // Report real title/author every time a video starts playing
               const data = e.target.getVideoData?.();
               if (data?.title) onVideoDataRef.current?.({ title: data.title, author: data.author || '' });
+              // Re-apply our Media Session handlers: YouTube iframe overrides them on play
+              setTimeout(() => applyMediaSessionRef.current?.(), 300);
             }
             if (s === 2) isPausedRef.current = true;
             if (s === 0 && !hasEndedRef.current) {
@@ -164,30 +166,40 @@ export default function VideoPlayer({
     try { p[fn]?.(); } catch {}
   }, []);
 
+  // Ref to the latest media-session registration so we can call it from YT events
+  const applyMediaSessionRef = useRef<() => void>(() => {});
+
   // ── Media Session API ─────────────────────────────────────────────────────
   useEffect(() => {
     if (platform !== 'youtube' || !('mediaSession' in navigator)) return;
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: title || 'WatchRoom',
-        artist: 'WatchRoom',
-        artwork: thumbnail ? [{ src: thumbnail, sizes: '512x512', type: 'image/jpeg' }] : [],
-      });
-      navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
-      navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
 
-      // Next / previous track — shown as ⏭ ⏮ on the lock screen
-      if (onNextTrackRef.current) {
-        navigator.mediaSession.setActionHandler('nexttrack', () => onNextTrackRef.current?.());
-      } else {
-        try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
-      }
-      if (onPrevTrackRef.current) {
-        navigator.mediaSession.setActionHandler('previoustrack', () => onPrevTrackRef.current?.());
-      } else {
-        try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
-      }
-    } catch {}
+    const apply = () => {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: title || 'WatchRoom',
+          artist: 'WatchRoom',
+          artwork: thumbnail ? [{ src: thumbnail, sizes: '512x512', type: 'image/jpeg' }] : [],
+        });
+        navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
+        navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
+        // Null out seek handlers so iOS shows ⏮/⏭ instead of ±10s
+        try { navigator.mediaSession.setActionHandler('seekforward',  null); } catch {}
+        try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
+        if (onNextTrackRef.current) {
+          navigator.mediaSession.setActionHandler('nexttrack', () => onNextTrackRef.current?.());
+        } else {
+          try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
+        }
+        if (onPrevTrackRef.current) {
+          navigator.mediaSession.setActionHandler('previoustrack', () => onPrevTrackRef.current?.());
+        } else {
+          try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
+        }
+      } catch {}
+    };
+
+    applyMediaSessionRef.current = apply;
+    apply();
   }, [platform, title, thumbnail, sendCmd, onNextTrack, onPrevTrack]);
 
   // ── Resume on tab/app focus ───────────────────────────────────────────────
