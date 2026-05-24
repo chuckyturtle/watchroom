@@ -268,6 +268,23 @@ export default function WatchPage() {
     fetchSuggestions(currentId);
   }, [currentId, leftSuggs, rightSuggs, fetchSuggestions]);
 
+  // Lock screen next/prev — use sidebar suggestions pool
+  const handleNextTrack = useCallback(() => {
+    const pool = [...leftSuggs, ...rightSuggs].filter(s => s.id !== currentId);
+    if (pool.length > 0) playSuggestion(pool[0]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, leftSuggs, rightSuggs]);
+
+  const handlePrevTrack = useCallback(() => {
+    const h = getHistory();
+    const prevIdx = h.findIndex(item => item.id === currentId);
+    const prev = h[prevIdx + 1]; // history is newest-first
+    if (prev && prev.platform === platform) {
+      playSuggestion({ id: prev.id, title: prev.title, thumbnail: prev.thumbnail, channel: prev.channel });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, platform]);
+
   // Update nextVideo when fresh suggestions arrive (without restarting the countdown)
   useEffect(() => {
     if (suggestions.length > 0 && !nextVideoRef.current) {
@@ -546,6 +563,8 @@ export default function WatchPage() {
                 platform={platform}
                 id={currentId}
                 onEnded={handleEnded}
+                onNextTrack={handleNextTrack}
+                onPrevTrack={handlePrevTrack}
                 blocked={showSugg}
                 title={videoTitle}
                 thumbnail={`https://i.ytimg.com/vi/${currentId}/mqdefault.jpg`}
