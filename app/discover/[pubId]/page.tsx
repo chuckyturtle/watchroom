@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
@@ -112,14 +113,18 @@ export default function DiscoverPlaylistPage() {
   const currentItem = order[currentIndex] ?? null;
 
   const goNext = useCallback(() => {
-    setCurrentIndex(i => {
-      const next = i + 1;
-      return next < orderRef.current.length ? next : 0;
+    flushSync(() => {
+      setCurrentIndex(i => {
+        const next = i + 1;
+        return next < orderRef.current.length ? next : 0;
+      });
     });
   }, []);
 
   const goPrev = useCallback(() => {
-    setCurrentIndex(i => (i > 0 ? i - 1 : orderRef.current.length - 1));
+    flushSync(() => {
+      setCurrentIndex(i => (i > 0 ? i - 1 : orderRef.current.length - 1));
+    });
   }, []);
 
   async function handleVote() {

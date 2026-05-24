@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
@@ -139,6 +140,14 @@ export default function WatchPage() {
   const nextVideoRef       = useRef<Suggestion | null>(null);
   const searchInputRef     = useRef<HTMLInputElement>(null);
 
+  // Refs so Media Session handlers always read latest values without stale closures
+  const currentIdRef    = useRef(currentId);
+  const leftSuggsRef    = useRef<Suggestion[]>([]);
+  const rightSuggsRef   = useRef<Suggestion[]>([]);
+  useEffect(() => { currentIdRef.current  = currentId;  }, [currentId]);
+  useEffect(() => { leftSuggsRef.current  = leftSuggs;  }, [leftSuggs]);
+  useEffect(() => { rightSuggsRef.current = rightSuggs; }, [rightSuggs]);
+
   const cfg = PLATFORM_LABELS[platform] || PLATFORM_LABELS.youtube;
 
   // Reset autoplay state on every video change
@@ -268,22 +277,35 @@ export default function WatchPage() {
     fetchSuggestions(currentId);
   }, [currentId, leftSuggs, rightSuggs, fetchSuggestions]);
 
-  // Lock screen next/prev — use sidebar suggestions pool
+  // Lock screen next/prev — use refs so handlers are never stale
+  // flushSync forces React to process the state update synchronously from
+  // the Media Session action handler (which runs outside React's event loop)
   const handleNextTrack = useCallback(() => {
-    const pool = [...leftSuggs, ...rightSuggs].filter(s => s.id !== currentId);
-    if (pool.length > 0) playSuggestion(pool[0]);
+    const pool = [...leftSuggsRef.current, ...rightSuggsRef.current]
+      .filter(s => s.id !== currentIdRef.current);
+    if (pool.length === 0) return;
+    const next = pool[0];
+    flushSync(() => {
+      setCurrentId(next.id);
+      setShowSugg(false);
+      setSuggestions([]);
+    });
+    window.history.replaceState(null, '', `/watch/${platform}/${next.id}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, leftSuggs, rightSuggs]);
+  }, [platform]);
 
   const handlePrevTrack = useCallback(() => {
     const h = getHistory();
-    const prevIdx = h.findIndex(item => item.id === currentId);
+    const prevIdx = h.findIndex(item => item.id === currentIdRef.current);
     const prev = h[prevIdx + 1]; // history is newest-first
-    if (prev && prev.platform === platform) {
-      playSuggestion({ id: prev.id, title: prev.title, thumbnail: prev.thumbnail, channel: prev.channel });
-    }
+    if (!prev) return;
+    flushSync(() => {
+      setCurrentId(prev.id);
+      setShowSugg(false);
+    });
+    window.history.replaceState(null, '', `/watch/${platform}/${prev.id}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, platform]);
+  }, [platform]);
 
   // Update nextVideo when fresh suggestions arrive (without restarting the countdown)
   useEffect(() => {
