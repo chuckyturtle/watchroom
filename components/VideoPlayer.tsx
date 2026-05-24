@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 
 type Platform = 'youtube' | 'twitch' | 'kick';
 
@@ -67,22 +67,29 @@ export default function VideoPlayer({
   useEffect(() => { onNextTrackRef.current = onNextTrack; }, [onNextTrack]);
   useEffect(() => { onPrevTrackRef.current = onPrevTrack; }, [onPrevTrack]);
 
+  // ── Synchronous video-swap for existing player ───────────────────────────
+  // useLayoutEffect fires synchronously within flushSync, so Media Session
+  // lock screen handlers (which call goNext via flushSync) actually trigger
+  // loadVideoById before the handler returns — iOS keeps ⏮/⏭ visible.
+  useLayoutEffect(() => {
+    if (platform !== 'youtube') return;
+    if (!playerRef.current || !playerReadyRef.current) return;
+    hasEndedRef.current = false;
+    if (autoplay) {
+      playerRef.current.loadVideoById(id);
+    } else {
+      playerRef.current.cueVideoById(id);
+    }
+  }, [platform, id, autoplay]);
+
   // ── YouTube IFrame API ────────────────────────────────────────────────────
   useEffect(() => {
     if (platform !== 'youtube') return;
 
     hasEndedRef.current = false;
 
-    // ── If player already exists and is ready: reuse it (keeps iOS media
-    //    session alive — avoids gesture-block on next video) ─────────────────
-    if (playerRef.current && playerReadyRef.current) {
-      if (autoplay) {
-        playerRef.current.loadVideoById(id);   // loads + plays immediately
-      } else {
-        playerRef.current.cueVideoById(id);    // loads but doesn't play
-      }
-      return;
-    }
+    // useLayoutEffect already handles video-loading for existing player
+    if (playerRef.current && playerReadyRef.current) return;
 
     // ── First mount: create the YT.Player ────────────────────────────────
     let cancelled = false;
