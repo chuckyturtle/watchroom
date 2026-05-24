@@ -216,7 +216,7 @@ export default function VideoPlayer({
         // handlers shadow YouTube's iframe seek handlers (which would otherwise just
         // seek ±10s within the current video instead of changing tracks).
         if (onNextTrackRef.current || nextIdRef.current) {
-          const handler = () => {
+          navigator.mediaSession.setActionHandler('nexttrack', () => {
             const nid = nextIdRef.current;
             if (nid && playerRef.current && playerReadyRef.current) {
               lastLoadedIdRef.current = nid;
@@ -224,16 +224,13 @@ export default function VideoPlayer({
               try { playerRef.current.loadVideoById(nid); } catch {}
             }
             onNextTrackRef.current?.();
-          };
-          navigator.mediaSession.setActionHandler('nexttrack',  handler);
-          try { navigator.mediaSession.setActionHandler('seekforward', handler); } catch {}
+          });
         } else {
-          try { navigator.mediaSession.setActionHandler('nexttrack',   null); } catch {}
-          try { navigator.mediaSession.setActionHandler('seekforward', null); } catch {}
+          try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
         }
 
         if (onPrevTrackRef.current || prevIdRef.current) {
-          const handler = () => {
+          navigator.mediaSession.setActionHandler('previoustrack', () => {
             const pid = prevIdRef.current;
             if (pid && playerRef.current && playerReadyRef.current) {
               lastLoadedIdRef.current = pid;
@@ -241,13 +238,16 @@ export default function VideoPlayer({
               try { playerRef.current.loadVideoById(pid); } catch {}
             }
             onPrevTrackRef.current?.();
-          };
-          navigator.mediaSession.setActionHandler('previoustrack', handler);
-          try { navigator.mediaSession.setActionHandler('seekbackward', handler); } catch {}
+          });
         } else {
           try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
-          try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
         }
+
+        // Always null seek handlers — registering them causes iOS to show ±10s circular
+        // buttons instead of ⏮/⏭. The Permissions-Policy header prevents YouTube's
+        // iframe from registering its own seek handlers that would override these nulls.
+        try { navigator.mediaSession.setActionHandler('seekforward',  null); } catch {}
+        try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
       } catch {}
     };
 
