@@ -129,8 +129,10 @@ export default function VideoPlayer({
               // Report real title/author every time a video starts playing
               const data = e.target.getVideoData?.();
               if (data?.title) onVideoDataRef.current?.({ title: data.title, author: data.author || '' });
-              // Re-apply our Media Session handlers: YouTube iframe overrides them on play
+              // Re-apply multiple times — YouTube iframe keeps overriding our handlers
               setTimeout(() => applyMediaSessionRef.current?.(), 300);
+              setTimeout(() => applyMediaSessionRef.current?.(), 800);
+              setTimeout(() => applyMediaSessionRef.current?.(), 1500);
             }
             if (s === 2) isPausedRef.current = true;
             if (s === 0 && !hasEndedRef.current) {
@@ -182,18 +184,20 @@ export default function VideoPlayer({
         });
         navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
         navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
-        // Null out seek handlers so iOS shows ⏮/⏭ instead of ±10s
-        try { navigator.mediaSession.setActionHandler('seekforward',  null); } catch {}
-        try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
         if (onNextTrackRef.current) {
-          navigator.mediaSession.setActionHandler('nexttrack', () => onNextTrackRef.current?.());
+          // Both nexttrack AND seekforward → whichever button iOS shows, ambos avanzan
+          navigator.mediaSession.setActionHandler('nexttrack',   () => onNextTrackRef.current?.());
+          try { navigator.mediaSession.setActionHandler('seekforward', () => onNextTrackRef.current?.()); } catch {}
         } else {
-          try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
+          try { navigator.mediaSession.setActionHandler('nexttrack',   null); } catch {}
+          try { navigator.mediaSession.setActionHandler('seekforward',  null); } catch {}
         }
         if (onPrevTrackRef.current) {
-          navigator.mediaSession.setActionHandler('previoustrack', () => onPrevTrackRef.current?.());
+          navigator.mediaSession.setActionHandler('previoustrack',  () => onPrevTrackRef.current?.());
+          try { navigator.mediaSession.setActionHandler('seekbackward', () => onPrevTrackRef.current?.()); } catch {}
         } else {
           try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
+          try { navigator.mediaSession.setActionHandler('seekbackward',  null); } catch {}
         }
       } catch {}
     };
