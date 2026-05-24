@@ -148,6 +148,14 @@ export default function WatchPage() {
   useEffect(() => { leftSuggsRef.current  = leftSuggs;  }, [leftSuggs]);
   useEffect(() => { rightSuggsRef.current = rightSuggs; }, [rightSuggs]);
 
+  // Precomputed next/prev ids for VideoPlayer's direct Media Session loading
+  const nextSuggId = [...leftSuggs, ...rightSuggs].filter(s => s.id !== currentId)[0]?.id;
+  const prevHistId = (() => {
+    const h = getHistory();
+    const idx = h.findIndex(item => item.id === currentId);
+    return h[idx + 1]?.id;
+  })();
+
   const cfg = PLATFORM_LABELS[platform] || PLATFORM_LABELS.youtube;
 
   // Reset autoplay state on every video change
@@ -584,6 +592,8 @@ export default function WatchPage() {
               <VideoPlayer
                 platform={platform}
                 id={currentId}
+                nextId={nextSuggId}
+                prevId={prevHistId}
                 onEnded={handleEnded}
                 onNextTrack={handleNextTrack}
                 onPrevTrack={handlePrevTrack}

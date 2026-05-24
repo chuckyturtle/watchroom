@@ -7,6 +7,8 @@ type Platform = 'youtube' | 'twitch' | 'kick';
 interface VideoPlayerProps {
   platform: Platform;
   id: string;
+  nextId?: string;   // precomputed next-video id — loaded directly in Media Session handler
+  prevId?: string;   // precomputed prev-video id
   onEnded?: () => void;
   onVideoData?: (data: { title: string; author: string }) => void;
   onNextTrack?: () => void;
@@ -46,34 +48,46 @@ function loadYouTubeAPI(): Promise<void> {
 }
 
 export default function VideoPlayer({
-  platform, id, onEnded, onVideoData, onNextTrack, onPrevTrack, blocked, title, thumbnail, autoplay,
+  platform, id, nextId, prevId,
+  onEnded, onVideoData, onNextTrack, onPrevTrack,
+  blocked, title, thumbnail, autoplay,
 }: VideoPlayerProps) {
   const [embedError, setEmbedError] = useState(false);
-  const containerRef   = useRef<HTMLDivElement>(null);
-  const iframeRef      = useRef<HTMLIFrameElement>(null);
-  const playerRef      = useRef<any>(null);
-  const playerReadyRef = useRef(false);
-  const isPausedRef    = useRef(false);
-  const hasEndedRef    = useRef(false);
+  const containerRef      = useRef<HTMLDivElement>(null);
+  const iframeRef         = useRef<HTMLIFrameElement>(null);
+  const playerRef         = useRef<any>(null);
+  const playerReadyRef    = useRef(false);
+  const isPausedRef       = useRef(false);
+  const hasEndedRef       = useRef(false);
+  // Track last id loaded directly (from Media Session handler) to avoid double-load
+  const lastLoadedIdRef   = useRef(id);
+  const reapplyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 
-  // Keep callback refs current so closures inside YT events never go stale
+  // Keep all callback and data refs current so closures never go stale
   const onEndedRef     = useRef(onEnded);
   const onVideoDataRef = useRef(onVideoData);
   const onNextTrackRef = useRef(onNextTrack);
   const onPrevTrackRef = useRef(onPrevTrack);
+  const nextIdRef      = useRef(nextId);
+  const prevIdRef      = useRef(prevId);
   useEffect(() => { onEndedRef.current     = onEnded;     }, [onEnded]);
   useEffect(() => { onVideoDataRef.current = onVideoData; }, [onVideoData]);
   useEffect(() => { onNextTrackRef.current = onNextTrack; }, [onNextTrack]);
   useEffect(() => { onPrevTrackRef.current = onPrevTrack; }, [onPrevTrack]);
+  useEffect(() => { nextIdRef.current      = nextId;      }, [nextId]);
+  useEffect(() => { prevIdRef.current      = prevId;      }, [prevId]);
 
   // ── Synchronous video-swap for existing player ───────────────────────────
-  // useLayoutEffect fires synchronously within flushSync, so Media Session
-  // lock screen handlers (which call goNext via flushSync) actually trigger
-  // loadVideoById before the handler returns — iOS keeps ⏮/⏭ visible.
+  // useLayoutEffect fires synchronously within flushSync, so on-page buttons
+  // (Siguiente/Anterior) still work via the React re-render path.
+  // When triggered from the Media Session handler (lock screen), lastLoadedIdRef
+  // is already set to the new id, so we skip the redundant load.
   useLayoutEffect(() => {
     if (platform !== 'youtube') return;
     if (!playerRef.current || !playerReadyRef.current) return;
+    if (lastLoadedIdRef.current === id) return;
+    lastLoadedIdRef.current = id;
     hasEndedRef.current = false;
     if (autoplay) {
       playerRef.current.loadVideoById(id);
@@ -88,10 +102,9 @@ export default function VideoPlayer({
 
     hasEndedRef.current = false;
 
-    // useLayoutEffect already handles video-loading for existing player
+    // useLayoutEffect handles video-loading for existing player
     if (playerRef.current && playerReadyRef.current) return;
 
-    // ── First mount: create the YT.Player ────────────────────────────────
     let cancelled = false;
 
     loadYouTubeAPI().then(() => {
@@ -110,7 +123,7 @@ export default function VideoPlayer({
           modestbranding: 1,
           iv_load_policy: 3,
           enablejsapi: 1,
-          playsinline: 1,          // iOS: play inline, not forced fullscreen
+          playsinline: 1,
           autoplay: autoplay ? 1 : 0,
           origin: window.location.origin,
         },
@@ -118,7 +131,6 @@ export default function VideoPlayer({
           onReady(e: any) {
             playerReadyRef.current = true;
             playerRef.current = e.target;
-            // Make the generated iframe fill the container
             const iframe: HTMLIFrameElement | undefined = e.target.getIframe?.();
             if (iframe) {
               iframe.style.width    = '100%';
@@ -128,25 +140,30 @@ export default function VideoPlayer({
               iframe.style.left     = '0';
             }
             if (autoplay) e.target.playVideo();
-            // Override YouTube's own Media Session setup that fires on ready
+            // Override YouTube's own Media Session setup that runs on ready
             setTimeout(() => applyMediaSessionRef.current?.(), 200);
           },
           onStateChange(e: any) {
             const s: number = e.data;
             if (s === 1) {
               isPausedRef.current = false;
-              // Report real title/author every time a video starts playing
               const data = e.target.getVideoData?.();
               if (data?.title) onVideoDataRef.current?.({ title: data.title, author: data.author || '' });
-              // Re-apply at multiple intervals — YouTube keeps overriding our handlers
-              setTimeout(() => applyMediaSessionRef.current?.(), 300);
-              setTimeout(() => applyMediaSessionRef.current?.(), 800);
+              // Start a persistent re-apply interval while playing —
+              // YouTube's iframe keeps re-registering its own handlers
+              if (reapplyIntervalRef.current) clearInterval(reapplyIntervalRef.current);
+              applyMediaSessionRef.current?.();
+              setTimeout(() => applyMediaSessionRef.current?.(), 500);
               setTimeout(() => applyMediaSessionRef.current?.(), 1500);
-              setTimeout(() => applyMediaSessionRef.current?.(), 3000);
+              reapplyIntervalRef.current = setInterval(() => applyMediaSessionRef.current?.(), 2000);
             }
-            if (s === 2) isPausedRef.current = true;
+            if (s === 2) {
+              isPausedRef.current = true;
+              if (reapplyIntervalRef.current) { clearInterval(reapplyIntervalRef.current); reapplyIntervalRef.current = null; }
+            }
             if (s === 0 && !hasEndedRef.current) {
               hasEndedRef.current = true;
+              if (reapplyIntervalRef.current) { clearInterval(reapplyIntervalRef.current); reapplyIntervalRef.current = null; }
               onEndedRef.current?.();
             }
           },
@@ -157,28 +174,26 @@ export default function VideoPlayer({
     });
 
     return () => { cancelled = true; };
-  // Only re-run when id or platform changes — NOT on callback changes
-  // (callbacks are kept fresh via refs above)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, id]);
 
-  // Destroy player only when component unmounts or platform changes away from youtube
+  // Destroy player (and stop re-apply interval) when component unmounts or platform changes
   useEffect(() => {
     return () => {
+      if (reapplyIntervalRef.current) { clearInterval(reapplyIntervalRef.current); reapplyIntervalRef.current = null; }
       try { playerRef.current?.destroy(); } catch {}
-      playerRef.current    = null;
+      playerRef.current     = null;
       playerReadyRef.current = false;
     };
   }, [platform]);
 
-  // ── Commands helper (used by media session / visibility handlers) ─────────
+  // ── Commands helper ───────────────────────────────────────────────────────
   const sendCmd = useCallback((fn: string) => {
     const p = playerRef.current;
     if (!p) return;
     try { p[fn]?.(); } catch {}
   }, []);
 
-  // Ref to the latest media-session registration so we can call it from YT events
   const applyMediaSessionRef = useRef<() => void>(() => {});
 
   // ── Media Session API ─────────────────────────────────────────────────────
@@ -194,27 +209,51 @@ export default function VideoPlayer({
         });
         navigator.mediaSession.setActionHandler('play',  () => { sendCmd('playVideo');  isPausedRef.current = false; });
         navigator.mediaSession.setActionHandler('pause', () => { sendCmd('pauseVideo'); isPausedRef.current = true; });
-        // Register ⏮/⏭ track handlers
-        if (onNextTrackRef.current) {
-          navigator.mediaSession.setActionHandler('nexttrack', () => onNextTrackRef.current?.());
+
+        // Directly call loadVideoById inside the handler — this bypasses the React
+        // re-render cycle entirely, so video changes even when the screen is locked.
+        // We also register seekforward/seekbackward with the same logic so that our
+        // handlers shadow YouTube's iframe seek handlers (which would otherwise just
+        // seek ±10s within the current video instead of changing tracks).
+        if (onNextTrackRef.current || nextIdRef.current) {
+          const handler = () => {
+            const nid = nextIdRef.current;
+            if (nid && playerRef.current && playerReadyRef.current) {
+              lastLoadedIdRef.current = nid;
+              hasEndedRef.current = false;
+              try { playerRef.current.loadVideoById(nid); } catch {}
+            }
+            onNextTrackRef.current?.();
+          };
+          navigator.mediaSession.setActionHandler('nexttrack',  handler);
+          try { navigator.mediaSession.setActionHandler('seekforward', handler); } catch {}
         } else {
-          try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch {}
+          try { navigator.mediaSession.setActionHandler('nexttrack',   null); } catch {}
+          try { navigator.mediaSession.setActionHandler('seekforward', null); } catch {}
         }
-        if (onPrevTrackRef.current) {
-          navigator.mediaSession.setActionHandler('previoustrack', () => onPrevTrackRef.current?.());
+
+        if (onPrevTrackRef.current || prevIdRef.current) {
+          const handler = () => {
+            const pid = prevIdRef.current;
+            if (pid && playerRef.current && playerReadyRef.current) {
+              lastLoadedIdRef.current = pid;
+              hasEndedRef.current = false;
+              try { playerRef.current.loadVideoById(pid); } catch {}
+            }
+            onPrevTrackRef.current?.();
+          };
+          navigator.mediaSession.setActionHandler('previoustrack', handler);
+          try { navigator.mediaSession.setActionHandler('seekbackward', handler); } catch {}
         } else {
           try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch {}
+          try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
         }
-        // Always remove seek handlers — YouTube registers these and iOS uses them to show
-        // ±10s circular buttons instead of ⏮/⏭. We must null them out after YouTube sets them.
-        try { navigator.mediaSession.setActionHandler('seekforward',  null); } catch {}
-        try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch {}
       } catch {}
     };
 
     applyMediaSessionRef.current = apply;
     apply();
-  }, [platform, title, thumbnail, sendCmd, onNextTrack, onPrevTrack]);
+  }, [platform, title, thumbnail, sendCmd, onNextTrack, onPrevTrack, nextId, prevId]);
 
   // ── Resume on tab/app focus ───────────────────────────────────────────────
   useEffect(() => {

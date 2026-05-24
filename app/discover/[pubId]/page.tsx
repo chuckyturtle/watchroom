@@ -111,6 +111,8 @@ export default function DiscoverPlaylistPage() {
   }, [order]);
 
   const currentItem = order[currentIndex] ?? null;
+  const nextItem    = order.length > 1 ? order[(currentIndex + 1) % order.length] : null;
+  const prevItem    = order.length > 1 ? order[currentIndex > 0 ? currentIndex - 1 : order.length - 1] : null;
 
   const goNext = useCallback(() => {
     flushSync(() => {
@@ -281,6 +283,8 @@ export default function DiscoverPlaylistPage() {
                 <VideoPlayer
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
+                  nextId={nextItem?.videoId}
+                  prevId={prevItem?.videoId}
                   onEnded={goNext}
                   onNextTrack={goNext}
                   onPrevTrack={goPrev}
