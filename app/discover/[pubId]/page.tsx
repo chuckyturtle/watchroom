@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import VideoPlayer from '@/components/VideoPlayer';
+import AudioKeepAlive from '@/components/AudioKeepAlive';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface PubItem {
@@ -59,6 +60,7 @@ export default function DiscoverPlaylistPage() {
   const [order,        setOrder]        = useState<PubItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [mode,         setMode]         = useState<'sequence' | 'shuffle'>('sequence');
+  const [audioStarted, setAudioStarted] = useState(false);
   const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
 
   const orderRef = useRef<PubItem[]>([]);
@@ -280,6 +282,7 @@ export default function DiscoverPlaylistPage() {
           <div>
             {currentItem && (
               <>
+                <AudioKeepAlive active={audioStarted} />
                 <VideoPlayer
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
@@ -288,9 +291,10 @@ export default function DiscoverPlaylistPage() {
                   onEnded={goNext}
                   onNextTrack={goNext}
                   onPrevTrack={goPrev}
-                  onVideoData={({ title }) =>
-                    setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }))
-                  }
+                  onVideoData={({ title }) => {
+                    setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }));
+                    setAudioStarted(true);
+                  }}
                   autoplay
                   title={resolvedTitles[currentItem.videoId] || currentItem.title}
                   thumbnail={currentItem.thumbnail}

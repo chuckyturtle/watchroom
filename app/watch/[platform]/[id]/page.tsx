@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import VideoPlayer from '@/components/VideoPlayer';
+import AudioKeepAlive from '@/components/AudioKeepAlive';
 import PlaybackPointsTracker from '@/components/PlaybackPointsTracker';
 import { useAuth } from '@/contexts/AuthContext';
 import { getHistory, buildTasteProfile, saveToHistory } from '@/lib/watchHistory';
@@ -114,6 +115,7 @@ export default function WatchPage() {
 
   const [currentId,    setCurrentId]    = useState(initId);
   const [videoTitle,   setVideoTitle]   = useState('');
+  const [audioStarted, setAudioStarted] = useState(false);
   const [videoChannel, setVideoChannel] = useState('');
   const [suggestions,  setSuggestions]  = useState<Suggestion[]>([]);
   const [showSugg,     setShowSugg]     = useState(false);
@@ -589,6 +591,7 @@ export default function WatchPage() {
             )}
 
             <div className="relative">
+              <AudioKeepAlive active={audioStarted} />
               <VideoPlayer
                 platform={platform}
                 id={currentId}
@@ -597,6 +600,10 @@ export default function WatchPage() {
                 onEnded={handleEnded}
                 onNextTrack={handleNextTrack}
                 onPrevTrack={handlePrevTrack}
+                onVideoData={({ title }) => {
+                  setVideoTitle(title);
+                  setAudioStarted(true);
+                }}
                 blocked={showSugg}
                 title={videoTitle}
                 thumbnail={`https://i.ytimg.com/vi/${currentId}/mqdefault.jpg`}
