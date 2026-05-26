@@ -3,53 +3,74 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * Keeps the iOS audio session alive while a YouTube video is playing.
+ * Keeps the iOS WKWebView audio session alive so the YouTube iframe
+ * continues playing when the screen is locked in PWA/standalone mode.
  *
- * iOS suspends audio from cross-origin iframes (YouTube embed) when the screen
- * locks in standalone/PWA mode. By running a near-silent AudioContext oscillator
- * at 1 Hz (below human hearing) on our own page, we hold the WKWebView audio
- * session open and iOS keeps the YouTube iframe playing in the background.
+ * Strategy: on the FIRST touchstart/click on the page (a direct user
+ * gesture), create an AudioContext and play white noise at -60 dBFS
+ * (inaudible but above iOS's "silence" threshold). This registers our
+ * page as the active audio producer so iOS doesn't suspend WKWebView
+ * when the screen locks.
  *
- * Must be started from a user gesture — pass `active={true}` after the user
- * has tapped play for the first time.
+ * Using window touchstart guarantees we're inside a real user-gesture
+ * chain — AudioContext + resume() called from postMessage (iframe
+ * events) do NOT count and start suspended.
  */
-export default function AudioKeepAlive({ active }: { active: boolean }) {
-  const ctxRef  = useRef<AudioContext | null>(null);
-  const oscRef  = useRef<OscillatorNode | null>(null);
-  const gainRef = useRef<GainNode | null>(null);
+export default function AudioKeepAlive() {
+  const ctxRef    = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
-    if (!active) return;
-    if (typeof window === 'undefined') return;
-    if (ctxRef.current) return; // already running
+    function start() {
+      if (ctxRef.current) return;
+      try {
+        const ctx = new AudioContext();
 
-    try {
-      const ctx  = new AudioContext();
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
+        // White noise at -60 dBFS: inaudible in practice but iOS sees
+        // it as real audio output and keeps the session active.
+        const rate       = ctx.sampleRate;
+        const seconds    = 3;
+        const buf        = ctx.createBuffer(1, rate * seconds, rate);
+        const data       = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+          data[i] = (Math.random() * 2 - 1) * 0.001; // ≈ -60 dBFS
+        }
 
-      // 1 Hz oscillator — completely inaudible (below 20 Hz human threshold)
-      // but counts as "active audio" for iOS's background session manager.
-      osc.frequency.value = 1;
-      gain.gain.value     = 0.00001;   // essentially silent
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop   = true;
+        src.connect(ctx.destination);
+        src.start(0);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
+        // resume() needed if browser auto-suspended the context
+        ctx.resume().catch(() => {});
 
-      ctxRef.current  = ctx;
-      oscRef.current  = osc;
-      gainRef.current = gain;
-    } catch {}
+        ctxRef.current    = ctx;
+        sourceRef.current = src;
+      } catch {}
+    }
+
+    // Re-resume when the user returns to the app (e.g. unlocks screen)
+    function onVisible() {
+      if (ctxRef.current?.state === 'suspended') {
+        ctxRef.current.resume().catch(() => {});
+      }
+    }
+
+    window.addEventListener('touchstart', start, { once: true, passive: true });
+    window.addEventListener('click',      start, { once: true });
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      try { oscRef.current?.stop(); } catch {}
-      try { ctxRef.current?.close(); } catch {}
-      ctxRef.current  = null;
-      oscRef.current  = null;
-      gainRef.current = null;
+      window.removeEventListener('touchstart', start);
+      window.removeEventListener('click',      start);
+      document.removeEventListener('visibilitychange', onVisible);
+      try { sourceRef.current?.stop(); } catch {}
+      ctxRef.current?.close().catch(() => {});
+      ctxRef.current    = null;
+      sourceRef.current = null;
     };
-  }, [active]);
+  }, []);
 
   return null;
 }

@@ -48,7 +48,6 @@ export default function PlaylistPlayerPage() {
   const [notFound, setNotFound] = useState(false);
 
   const [mode, setMode] = useState<ShuffleMode>('sequence');
-  const [audioStarted, setAudioStarted] = useState(false);
   const [order, setOrder] = useState<PlaylistItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   // resolved titles: videoId -> title (populated from YT player or oEmbed)
@@ -319,7 +318,7 @@ export default function PlaylistPlayerPage() {
           <div>
             {currentItem && (
               <>
-                <AudioKeepAlive active={audioStarted} />
+                <AudioKeepAlive />
                 <VideoPlayer
                   platform={currentItem.platform as 'youtube' | 'twitch' | 'kick'}
                   id={currentItem.videoId}
@@ -328,10 +327,9 @@ export default function PlaylistPlayerPage() {
                   onEnded={goNext}
                   onNextTrack={goNext}
                   onPrevTrack={goPrev}
-                  onVideoData={({ title }) => {
-                    setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }));
-                    setAudioStarted(true);
-                  }}
+                  onVideoData={({ title }) =>
+                    setResolvedTitles(prev => ({ ...prev, [currentItem.videoId]: title }))
+                  }
                   autoplay
                   title={resolvedTitles[currentItem.videoId] || currentItem.title}
                   thumbnail={currentItem.thumbnail}

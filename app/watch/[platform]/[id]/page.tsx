@@ -115,7 +115,6 @@ export default function WatchPage() {
 
   const [currentId,    setCurrentId]    = useState(initId);
   const [videoTitle,   setVideoTitle]   = useState('');
-  const [audioStarted, setAudioStarted] = useState(false);
   const [videoChannel, setVideoChannel] = useState('');
   const [suggestions,  setSuggestions]  = useState<Suggestion[]>([]);
   const [showSugg,     setShowSugg]     = useState(false);
@@ -591,7 +590,7 @@ export default function WatchPage() {
             )}
 
             <div className="relative">
-              <AudioKeepAlive active={audioStarted} />
+              <AudioKeepAlive />
               <VideoPlayer
                 platform={platform}
                 id={currentId}
@@ -600,10 +599,7 @@ export default function WatchPage() {
                 onEnded={handleEnded}
                 onNextTrack={handleNextTrack}
                 onPrevTrack={handlePrevTrack}
-                onVideoData={({ title }) => {
-                  setVideoTitle(title);
-                  setAudioStarted(true);
-                }}
+                onVideoData={({ title }) => setVideoTitle(title)}
                 blocked={showSugg}
                 title={videoTitle}
                 thumbnail={`https://i.ytimg.com/vi/${currentId}/mqdefault.jpg`}
