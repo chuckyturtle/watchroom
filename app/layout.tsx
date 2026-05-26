@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
-import IOSDesktopBanner from '@/components/IOSDesktopBanner';
 
 export const metadata: Metadata = {
   title: 'WatchRoom — Ve YouTube, Twitch y Kick con amigos',
@@ -16,19 +15,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#4f46e5',
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
+  width: 1280,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
       <body>
-        <AuthProvider>
-          {children}
-          <IOSDesktopBanner />
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
