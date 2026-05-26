@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: 'WatchRoom',
     description: 'Ve YouTube, Twitch y Kick con amigos',
     start_url: '/',
-    display: 'standalone',
+    display: 'browser',
     background_color: '#0f0f13',
     theme_color: '#4f46e5',
     orientation: 'portrait',
