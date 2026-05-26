@@ -17,8 +17,9 @@ import { useEffect, useRef } from 'react';
  * events) do NOT count and start suspended.
  */
 export default function AudioKeepAlive() {
-  const ctxRef    = useRef<AudioContext | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const ctxRef       = useRef<AudioContext | null>(null);
+  const sourceRef    = useRef<AudioBufferSourceNode | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     function start() {
@@ -28,10 +29,9 @@ export default function AudioKeepAlive() {
 
         // White noise at -60 dBFS: inaudible in practice but iOS sees
         // it as real audio output and keeps the session active.
-        const rate       = ctx.sampleRate;
-        const seconds    = 3;
-        const buf        = ctx.createBuffer(1, rate * seconds, rate);
-        const data       = buf.getChannelData(0);
+        const rate    = ctx.sampleRate;
+        const buf     = ctx.createBuffer(1, rate * 3, rate);
+        const data    = buf.getChannelData(0);
         for (let i = 0; i < data.length; i++) {
           data[i] = (Math.random() * 2 - 1) * 0.001; // ≈ -60 dBFS
         }
@@ -41,17 +41,22 @@ export default function AudioKeepAlive() {
         src.loop   = true;
         src.connect(ctx.destination);
         src.start(0);
-
-        // resume() needed if browser auto-suspended the context
         ctx.resume().catch(() => {});
 
         ctxRef.current    = ctx;
         sourceRef.current = src;
+
+        // Heartbeat: resume if iOS suspended the context (happens on lock)
+        heartbeatRef.current = setInterval(() => {
+          if (ctxRef.current?.state === 'suspended') {
+            ctxRef.current.resume().catch(() => {});
+          }
+        }, 3000);
       } catch {}
     }
 
-    // Re-resume when the user returns to the app (e.g. unlocks screen)
-    function onVisible() {
+    // Resume on any visibility change — covers both lock (hidden) and unlock (visible)
+    function onVisChange() {
       if (ctxRef.current?.state === 'suspended') {
         ctxRef.current.resume().catch(() => {});
       }
@@ -59,12 +64,13 @@ export default function AudioKeepAlive() {
 
     window.addEventListener('touchstart', start, { once: true, passive: true });
     window.addEventListener('click',      start, { once: true });
-    document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onVisChange);
 
     return () => {
       window.removeEventListener('touchstart', start);
       window.removeEventListener('click',      start);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisChange);
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       try { sourceRef.current?.stop(); } catch {}
       ctxRef.current?.close().catch(() => {});
       ctxRef.current    = null;

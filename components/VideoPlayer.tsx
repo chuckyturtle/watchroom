@@ -155,7 +155,13 @@ export default function VideoPlayer({
               applyMediaSessionRef.current?.();
               setTimeout(() => applyMediaSessionRef.current?.(), 500);
               setTimeout(() => applyMediaSessionRef.current?.(), 1500);
-              reapplyIntervalRef.current = setInterval(() => applyMediaSessionRef.current?.(), 2000);
+              reapplyIntervalRef.current = setInterval(() => {
+                applyMediaSessionRef.current?.();
+                // Keep YouTube playing when screen is locked
+                if (document.hidden && !isPausedRef.current && playerRef.current && playerReadyRef.current) {
+                  try { playerRef.current.playVideo(); } catch {}
+                }
+              }, 2000);
             }
             if (s === 2) {
               isPausedRef.current = true;
@@ -255,10 +261,25 @@ export default function VideoPlayer({
     apply();
   }, [platform, title, thumbnail, sendCmd, onNextTrack, onPrevTrack, nextId, prevId]);
 
-  // ── Resume on tab/app focus ───────────────────────────────────────────────
+  // ── Resume on tab/app focus + fight YouTube's auto-pause on lock ─────────
   useEffect(() => {
     if (platform !== 'youtube') return;
     function onVisChange() {
+      if (document.visibilityState === 'hidden') {
+        // YouTube detects document.hidden and pauses itself. Call playVideo
+        // immediately (before iOS suspends JS) and on short delays to counter it.
+        if (!isPausedRef.current && playerRef.current && playerReadyRef.current) {
+          const tryPlay = () => {
+            if (!isPausedRef.current && playerRef.current && playerReadyRef.current) {
+              try { playerRef.current.playVideo(); } catch {}
+            }
+          };
+          tryPlay();
+          setTimeout(tryPlay, 150);
+          setTimeout(tryPlay, 500);
+          setTimeout(tryPlay, 1200);
+        }
+      }
       if (document.visibilityState === 'visible' && !isPausedRef.current) {
         setTimeout(() => sendCmd('playVideo'), 700);
       }
